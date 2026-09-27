@@ -1,0 +1,80 @@
+%% debcred: functional blocks of dbo.sp_debcred_empresa (legacy/debcred/sp_debcred_empresa.sp), 2026-09-27
+graph TD
+  subgraph PRE["Pre-transaction (lines 1-396)"]
+    B1[B1 Init and commission normalization 168-272]
+    B2[B2 Concept resolution 276-314]
+    B3[B3 Accounting config 318-396]
+  end
+  subgraph TX["Inside begin tran / savepoint (402-2130)"]
+    B4[B4 begin tran + save tran 402-408]
+    B5[B5 Reference string / special causal 414-616]
+    B6[B6 Debit note AH/CC/VI 624-740]
+    B7[B7 Notifications SMS/events 746-1256]
+    B8[B8 Accounting account tipcta 9 1260-1322]
+    B9[B9 Savepoint rollback + movement record 1332-1492]
+    B10[B10 Commission debit 1500-1732]
+    B11[B11 Second SWIFT commission 1742-1856]
+    B12[B12 Update bp_total_orden state 1876-2090]
+    B14[B14 commit / return 0 2130-2136]
+  end
+  subgraph ERR["Error exit"]
+    B15[B15 lbl_error 2140-2170]
+  end
+  subgraph PROCS["External procedures (none in tree)"]
+    P_com([sp_con_comision])
+    P_conf([sp_con_confcontable])
+    P_vi([sp_vi_ndc_automatica])
+    P_ndc([sp_ndc_ahcc])
+    P_gts([sp_graba_tran_servicio])
+    P_ev([sp_eventos])
+    P_not([pa_sat_pnotificacion])
+    P_mov([sp_grb_mov_y_frmpgo])
+    P_gc([sp_grb_comision])
+    P_err([sp_cerror])
+  end
+  subgraph TABLES["Tables (no DDL in tree)"]
+    T_cat[(ba_tabla / ba_catalogo)]
+    T_vi[(vi_cuenta)]
+    T_cc[(cc_ctacte)]
+    T_ah[(ah_cuenta)]
+    T_ord[(bp_orden / bp_detalle)]
+    T_his[(db_sat_his *_his)]
+    T_tot[(bp_total_orden)]
+  end
+  B1 --> B2 --> B3 --> B4
+  B1 --> P_com
+  B2 --> T_vi
+  B3 --> P_conf
+  B3 -- error 120000 --> B15
+  B4 -- tipcta 3,4,12 --> B5
+  B4 -- else --> B8
+  B5 --> T_cat
+  B5 --> P_conf
+  B5 --> B6
+  B6 -- tipcta 12 --> P_vi
+  B6 -- tipcta 3,4 --> P_ndc
+  B6 -- return 0 --> B7
+  B7 --> T_cat
+  B7 --> T_ord
+  B7 --> T_his
+  B7 --> T_cc
+  B7 --> T_ah
+  B7 --> P_ev
+  B7 --> P_not
+  B8 -- tipcta 9 --> P_gts
+  B7 --> B9
+  B8 --> B9
+  B9 --> T_ord
+  B9 --> P_mov
+  B9 -- debit error: commit, return --> B14
+  B9 -- 122002 --> B15
+  B9 --> B10 --> B11 --> B12
+  B10 --> P_gc
+  B10 -- error: full rollback, then P_mov outside tran --> P_mov
+  B11 --> P_gc
+  B11 -- 122003 --> B15
+  B12 --> T_tot
+  B12 --> T_his
+  B12 -- 122004 --> B15
+  B12 --> B14
+  B15 --> P_err

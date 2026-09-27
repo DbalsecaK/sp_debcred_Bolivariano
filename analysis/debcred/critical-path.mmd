@@ -1,0 +1,24 @@
+%% debcred critical path: a company pays a supplier from its current account (TRANSCLI, tipcta 3).
+%% No telemetry (p50/p99 unavailable); the order is execution order.
+flowchart TD
+  S([COBIS caller executes sp_debcred_empresa]) --> B1[B1 normalize commissions; sp_con_comision per-transaction tariff]
+  B1 --> B3[B3 sp_con_confcontable: transaction code + causal]
+  B3 -->|error| E15[B15 lbl_error: rollback, sp_cerror if aplcobis='S']
+  B3 --> B4[B4 begin tran; save tran 'sp_debito_empresa']
+  B4 --> B5[B5 reference string from the company order number]
+  B5 --> B6[B6 sp_ndc_ahcc: debit the current account]
+  B6 -->|return 0| B7[B7 notification: beneficiary lookup, sp_eventos]
+  B7 -->|@w_cod_errord overwritten :1248| B9
+  B6 -->|error code| B9[B9 outcome]
+  B9 -->|debit failed| R1[rollback to savepoint; sp_grb_mov_y_frmpgo error movement; COMMIT; return code]
+  B9 -->|ok| M[sp_grb_mov_y_frmpgo: movement + payment form]
+  M -->|error 122002| E15
+  M --> B10[B10 sp_grb_comision: commission]
+  B10 -->|fail REF44| R2[FULL rollback; sp_grb_mov_y_frmpgo outside tran; return]
+  B10 --> B11{TRANSWIFT and valor2_swift > 0?}
+  B11 -->|yes| C2[sp_grb_comision tipoafec 16]
+  C2 -->|error 122003| E15
+  B11 -->|no| B12
+  C2 --> B12[B12 update bp_total_orden I -> T, fallback to bp_total_orden_his]
+  B12 -->|no row and service not exempt| E15
+  B12 --> B14([B14 commit; return 0])

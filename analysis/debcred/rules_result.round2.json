@@ -1,0 +1,1912 @@
+{
+ "system": "debcred",
+ "mode": "lenses",
+ "rounds": 2,
+ "confirmedRules": [
+  {
+   "name": "Combined commission is normalized into a separate commission when no separate value is supplied",
+   "category": "Policy",
+   "priority": "P1",
+   "source": "sp_debcred_empresa.sp:188-196 ; also sp_debcred_empresa.sp:188-196 ; also sp_debcred_empresa.sp:188-196",
+   "plainEnglish": "If the caller passes the commission bundled with the debit (@i_comision) but no separate commission (@i_valor_comision = 0), the procedure moves the amount to the separate-commission field and clears the bundled one, so commissions are always posted as their own movement.",
+   "given": "A company debit order with @i_comision = 2.50 and @i_valor_comision = 0",
+   "when": "sp_debcred_empresa starts",
+   "then": "@i_valor_comision becomes 2.50 and @i_comision becomes 0; the commission will later be debited via sp_grb_comision as a separate movement",
+   "parameters": "Trigger: @i_comision > 0 AND @i_valor_comision = 0 (exact zero; NULL does not trigger). Comment dates the change to 18/11/2013 (ref28).",
+   "edgeCases": [
+    "@i_valor_comision NULL and @i_comision > 0: no swap occurs, commission stays bundled (isnull only applied later at line 230/236)",
+    "Both > 0: no swap; both values coexist and later @w_comision_und takes @i_valor_comision (line 236-238 wins over 230-232)"
+   ],
+   "confidence": "High"
+  },
+  {
+   "name": "Number of billable transactions is derived from commission amount divided by configured per-transaction fee",
+   "category": "Calculation",
+   "priority": "P1",
+   "source": "sp_debcred_empresa.sp:204-248 ; also sp_debcred_empresa.sp:204-248 ; also sp_debcred_empresa.sp:204-248",
+   "plainEnglish": "The company's configured per-transaction fee (scope 'E', commission type '01', sequence 1) is looked up; the total commission is divided by that fee to compute how many transactions are being charged, and the unit commission passed downstream is the configured per-transaction fee itself.",
+   "given": "Company 500, product 1, service TRANSCLI, channel DIR with configured per-transaction fee 0.25 and @i_valor_comision = 5.00",
+   "when": "The commission breakdown is computed before the debit note",
+   "then": "@w_cantidad = 20 (5.00 / 0.25, truncated to integer) and @w_comision_und = 0.25; both are passed to sp_ndc_ahcc as @i_nchq and @i_solca",
+   "parameters": "sp_con_comision inputs: @i_cod_alcance='E', @i_tip_comision='01', @i_secuencia=1. @w_cantidad is int (truncating division). If sp_con_comision fails, per-transaction fee is treated as 0.",
+   "edgeCases": [
+    "Per-transaction fee = 0 or lookup fails: @w_cantidad stays 0 and @w_comision_und is overwritten to 0 (line 248 runs unconditionally)",
+    "Commission not an exact multiple of fee (e.g. 5.10 / 0.25): quantity truncates to 20, remainder is silently dropped from the count",
+    "Only used for account types 3/4 path (sp_ndc_ahcc); virtual-account path (type 12) ignores these values"
+   ],
+   "confidence": "Medium",
+   "smeQuestion": "Is the unconditional overwrite @w_comision_und = @w_val_por_tran at line 248 intentional (unit commission always equals the configured fee, even when the caller-supplied commission differs or the fee is 0), and should quantity truncate or round? | Is the truncation of @w_cantidad (int) intentional, and is it acceptable that count x unit price can differ from the commission actually debited? What does @i_nchq/@i_solca drive downstream in sp_ndc_ahcc? | Is truncating the transaction count (int) intended when the commission is not an exact multiple of the per-transaction tariff, and should the unit commission really be reported as 0 when no tariff is configured?",
+   "suspectedDefect": "Line 248 sets the unit commission to the configured fee even when the lookup failed (fee = 0), discarding the caller's commission value for the debit-note detail; integer division at 244 silently truncates. | Line 248 unconditionally sets @w_comision_und = @w_val_por_tran, so when no tariff is configured the debit note receives unit commission 0 even though a commission was charged."
+  },
+  {
+   "name": "Accounting transaction code and causal are resolved from the accounting configuration; missing configuration aborts the debit",
+   "category": "Validation",
+   "priority": "P0",
+   "source": "sp_debcred_empresa.sp:278-394 ; also sp_debcred_empresa.sp:278-394 ; also sp_debcred_empresa.sp:278-394",
+   "plainEnglish": "Before any money moves, the transaction code and causal must be found in the accounting configuration for the product/service/affectation type/payment form/channel/account type/currency/reference type/company; the 'basic account' concept modifies the lookup, and if no configuration exists the whole operation fails with error 120000.",
+   "given": "Service TRANSCLI, product 1, affectation '10', payment form 'CUE', channel 'DIR', company account type 12 that is a basic account (vi_prod_banc = 13)",
+   "when": "sp_con_confcontable is called",
+   "then": "Concept '91' is passed, and the returned trn/causal are used for the debit; if the call returns > 0 the procedure rolls back and raises 120000 ('No existe configuracion contable')",
+   "parameters": "Concept default '0'; basic account concept '91' when @i_tipcta_emp = 12 and cob_virtuales..vi_cuenta.vi_prod_banc = 13; for service 'SPI' the concept is taken from @s_term (which is then blanked); for 'TRANSQUICK' with @i_frm_pagcob_spi not null the SPI payment form is used instead of @i_frm_pagcob and no concept is passed. Error code 120000.",
+   "edgeCases": [
+    "SPI service: @s_term is reused as the concept carrier and reset to ' ' (ref41)",
+    "TRANSQUICK with SPI payment form: lookup uses @i_frm_pagcob_spi and omits @i_concepto",
+    "@@error <> 0 after call also triggers 120000"
+   ],
+   "confidence": "High"
+  },
+  {
+   "name": "IMPADUAN debits for CORPEI use the NDCORPEI accounting concept with fallback causal 512",
+   "category": "Policy",
+   "priority": "P1",
+   "source": "sp_debcred_empresa.sp:456-550 ; also sp_debcred_empresa.sp:456-550 ; also sp_debcred_empresa.sp:456-550",
+   "plainEnglish": "For customs-import payments (IMPADUAN) where the SWIFT code is 'CORPEI', the causal is re-resolved using the catalog concept flagged NDCORPEI; if no causal comes back, causal '512' is used, and a failed lookup aborts with 120000.",
+   "given": "Service IMPADUAN, @i_cod_swift = 'CORPEI', catalog ad_concepto_contable has an active entry with ct_otro_campo_catalogo = 'NDCORPEI' and code '77'",
+   "when": "Causal is resolved for the debit",
+   "then": "sp_con_confcontable is called with concept '77'; @w_causal = returned causal, or '512' if NULL",
+   "parameters": "Default concept '99999' if catalog entry missing; fallback causal '512'; catalog table 'ad_concepto_contable', flag 'NDCORPEI', status 'A'. Error 120000 on @w_return > 0.",
+   "edgeCases": [
+    "NULL @i_cod_swift is treated as '' and does not match CORPEI",
+    "Catalog entry missing: concept '99999' is sent to the config lookup"
+   ],
+   "confidence": "High"
+  },
+  {
+   "name": "Debit note is routed by account type: virtual accounts via automatic virtual NDC, current/savings via standard NDC",
+   "category": "Lifecycle",
+   "priority": "P0",
+   "source": "sp_debcred_empresa.sp:624-740",
+   "plainEnglish": "Virtual accounts (type 12) are debited through the virtual-accounts automatic debit note with mandatory account-state verification on channel SAT; current and savings accounts are debited through the standard NDC routine carrying the commission breakdown and order references.",
+   "given": "Company account type 12, debit amount 100.00, batch flag derived from @i_aplcobis = 'N'",
+   "when": "The debit note is issued",
+   "then": "cob_virtuales..sp_vi_ndc_automatica is called with @i_canal='SAT', @i_verf_estado_cta='S', @i_batch=1, @i_ofi=0; for type 3/4 sp_ndc_ahcc is called instead with @i_nchq=@w_cantidad, @i_solca=@w_comision_und, @i_tcomision=@i_comision",
+   "parameters": "Batch flag: @i_aplcobis='S' -> 0, 'N' -> 1 (lines 176-178). Virtual path fixed channel 'SAT', office 0, verify state 'S'. Standard path: office 0, @i_secuencial=0, @i_alterno_dos=@i_frm_pagcob, @i_frm_pagcob=@i_frm_pagcob_spi.",
+   "edgeCases": [
+    "Return code of the debit routine becomes @w_cod_errord, which drives rollback/status later",
+    "Virtual path also writes @o_error into @w_cod_errord then overwrites it with @w_return (line 666)"
+   ],
+   "confidence": "High"
+  },
+  {
+   "name": "Successful debits trigger a customer notification event with channel and product mapping, unless blocked",
+   "category": "Policy",
+   "priority": "P1",
+   "source": "sp_debcred_empresa.sp:746-1254 ; also sp_debcred_empresa.sp:746-1254 ; also sp_debcred_empresa.sp:746-1246",
+   "plainEnglish": "After a successful debit (except supplier payments PAGOPRV), if the service is configured for SMS on the mapped channel, a notification is sent: basic-notification services ('B') go through pa_sat_pnotificacion, others through cob_internet..sp_eventos, unless the service/sms-service/calling-sp combination is in the block list or it is a BCE-channel ROLPAGO with no account.",
+   "given": "Service TRANSCLI on channel 'BNK', debit 100.00, commission 0.50, active ad_servicios_sms entry ending in 'IBK', credit account type 4, no block-list entry",
+   "when": "The debit note returns 0",
+   "then": "Channel is mapped to 'IBK'/'24OnLine', credit product 'AHO', debit product from the company account type, sp_eventos is called with value '100.00' and cost '0.50'",
+   "parameters": "Channel map: DIR/SAT -> 'SAT'/'SAT'; BNK -> 'IBK'/'24OnLine'; VEN -> 'Ventanilla'. Credit product map: tip_cta 0 -> null, 3 -> 'CTE', 4 -> 'AHO', 9 -> 'CON', 8 -> 'ESP'. Debit product: 3 -> 'CTE', 4 -> 'AHO', 12 -> 'VIR' (or 'AHO' when vi_prod_banc = 13). Notification cost = isnull(@w_valor_comision,0) + isnull(@i_valor2_swift,0). Catalogs: ad_servicios_sms, ad_notificacion_basica (default 'OTRO'), ba_bloqueaNotificacionSAT, ad_cuentas_bce. Excluded service: 'PAGOPRV'. TRANSWIFT: institution/credit account from bp_orden/bp_detalle (falls back to db_sat_his). TRANSCLI/TARJCRED/COMEXT: institution from ad_cuentas_bce catalog name positions 10-32.",
+   "edgeCases": [
+    "No ad_servicios_sms match: no notification, silently skipped",
+    "Block list match on rtrim(service)+'-'+sms_service and sp_name -> notification suppressed",
+    "@w_canal_sms = 'BCE' and service ROLPAGO and NULL account -> suppressed",
+    "Lookups fall back to historical tables (db_sat_his) when live tables return no rows",
+    "@w_return from notification routines overwrites @w_cod_errord (line 1248), so a notification failure marks the debit as failed"
+   ],
+   "confidence": "Medium",
+   "smeQuestion": "Should a failure in the notification routines (sp_eventos / pa_sat_pnotificacion) really cause the whole debit to roll back (line 1248 propagates it into @w_cod_errord), or should notification failures be non-blocking? | Is the notification intended to be best-effort, or should a notification failure really reverse the debit as the code currently does (line 1248)? | Should a failed notification event really cause the debit to be rolled back and recorded as error (line 1248 overwrites the debit error code with the notification result)?",
+   "suspectedDefect": "@w_cod_errord = @w_return at line 1248 lets a notification failure reverse an otherwise successful debit."
+  },
+  {
+   "name": "For TRANSCLI, TARJCRED and COMEXT the recorded debit value is replaced by the ordered value",
+   "category": "Calculation",
+   "priority": "P1",
+   "source": "sp_debcred_empresa.sp:878-886",
+   "plainEnglish": "For client transfers, credit-card and foreign-trade services, after the debit note has already been issued the working debit value is overwritten with the ordered value and the commission used for the notification is the bundled commission.",
+   "given": "Service TRANSCLI, @i_valor_debito = 100.50 (already debited) and @i_valor_ordenado = 100.00, @i_comision = 0.50",
+   "when": "The notification block runs",
+   "then": "@i_valor_debito becomes 100.00 and @w_valor_comision = 0.50; the subsequent movement record (sp_grb_mov_y_frmpgo @i_valor_mov) and notification value use 100.00",
+   "parameters": "Services: 'TRANSCLI', 'TARJCRED', 'COMEXT'. Only executes when an SMS service was found (@w_serv_sms not null) and the debit succeeded.",
+   "edgeCases": [
+    "If no ad_servicios_sms entry exists the override does not run, so the movement is recorded with the original debit value - behavior differs by notification configuration",
+    "Line 882 'select @i_comision, @i_valor_ordenado' returns a stray result set to the caller (debug leftover)"
+   ],
+   "confidence": "Medium",
+   "smeQuestion": "Is it intended that the recorded movement value for TRANSCLI/TARJCRED/COMEXT equals the ordered value (excluding commission) only when an SMS configuration exists, and should the stray result set at line 882 be removed?",
+   "suspectedDefect": "Debit value used for the accounting movement depends on whether an SMS catalog row exists; the debug 'select' at line 882 emits an unexpected result set."
+  },
+  {
+   "name": "Accounting-account debits for company 1295 on SPI are booked as balance instead of value",
+   "category": "Policy",
+   "priority": "P1",
+   "source": "sp_debcred_empresa.sp:1264-1300 ; also sp_debcred_empresa.sp:1270-1280 ; also sp_debcred_empresa.sp:1264-1300",
+   "plainEnglish": "When the company account is an accounting account (type 9) the debit is recorded via sp_graba_tran_servicio; for company 1295 on the SPI service the amount is sent as balance (@i_saldo) and the debit value is forced to 0.",
+   "given": "Company 1295, service SPI, account type 9, debit 250.00",
+   "when": "The accounting debit is recorded",
+   "then": "sp_graba_tran_servicio receives @i_saldo = 250.00 and @i_valor = 0, indicator 1, chequebook-type = '1295'; for any other company/service @i_saldo is NULL and @i_valor = 250.00",
+   "parameters": "Hardcoded company id '1295' and service 'SPI'; @i_indicador = 1; @i_oficina_cta = 0; @i_secuencial = 0; @i_tipo_chequera = company id as string.",
+   "edgeCases": [
+    "@i_valor_debito remains 0 afterwards, so the movement record (line 1424) is also written with value 0 for this case"
+   ],
+   "confidence": "Low",
+   "smeQuestion": "What business arrangement does company 1295 on SPI represent (ref45), and should the zeroed debit value also flow into the recorded movement? | Who is company 1295 and why are its SPI accounting debits recorded as balance with a zero transaction value? Should this be a configurable list rather than a hardcoded company? | Who is company 1295 and why is its SPI debit on ledger accounts recorded as 'saldo' with zero value? Should this be a configurable list rather than a hardcoded id?"
+  },
+  {
+   "name": "Debit outcome sets process status, rolls back on failure, and the movement is always recorded",
+   "category": "Lifecycle",
+   "priority": "P0",
+   "source": "sp_debcred_empresa.sp:1332-1492 ; also sp_debcred_empresa.sp:1332-1492 ; also sp_debcred_empresa.sp:1332-1492",
+   "plainEnglish": "If the debit note failed, the debit is rolled back to the savepoint and the status becomes 'X' (failed); otherwise 'P' (processed). In both cases a movement/payment-form record is written with the status and error code; if writing that record fails the whole thing aborts with 122002, and if the debit had failed the transaction is committed and the error returned.",
+   "given": "Debit note returned error 201045",
+   "when": "The post-debit step runs",
+   "then": "rollback to savepoint 'sp_debito_empresa', status 'X', sp_grb_mov_y_frmpgo called with @i_est_proceso='X' and @i_cod_error=201045, then commit and return 201045",
+   "parameters": "Status codes: 'P' processed, 'X' failed. Savepoint name 'sp_debito_empresa'. Movement affectation type '1'. Error 122002 when the movement record fails. @i_valor_comision sent to movement = bundled @i_comision.",
+   "edgeCases": [
+    "SPI returns (affectation '12'): service on the movement is replaced by the original order's service (bp_orden.or_servicio, fallback history) and total-order update is disabled (@w_act_totord='N') (lines 1348-1380)",
+    "Successful debit continues to commission step without committing yet"
+   ],
+   "confidence": "High",
+   "suspectedDefect": "Line 1248 assigns @w_cod_errord = @w_return after the notification block (sp_eventos / pa_sat_pnotificacion); a notification error therefore reverses a successful debit. Also lines 882-886 change @i_valor_debito after the debit has already been posted, so the movement record may not match the amount actually debited."
+  },
+  {
+   "name": "Separate commission is debited as its own movement; failure rolls back the whole debit",
+   "category": "Lifecycle",
+   "priority": "P0",
+   "source": "sp_debcred_empresa.sp:1500-1732 ; also sp_debcred_empresa.sp:1500-1732 ; also sp_debcred_empresa.sp:1500-1732",
+   "plainEnglish": "When a separate commission value exists it is debited via sp_grb_comision with reference 'COBRO DE COMISION'; if that fails the entire transaction (including the service debit) is rolled back, a failed commission movement is recorded, and the error is returned.",
+   "given": "Service debit succeeded, @i_valor_comision = 1.20",
+   "when": "The commission step runs",
+   "then": "sp_grb_comision is invoked with 1.20 and reference 'COBRO DE COMISION'; on error the full transaction rolls back, sp_grb_mov_y_frmpgo is written with status 'X', value 1.20 and the error code, and the procedure returns that code",
+   "parameters": "Trigger: @i_valor_comision > 0. Reference literal 'COBRO DE COMISION'. TRANSBIMO: @i_valor_tarifa = @i_valor_comision. TRANSQUICK with SPI payment form: @i_frm_pagcob replaced by @i_frm_pagcob_spi for the commission. Error 122003 generic, replaced by the returned code if non-zero. Tariff/commission splits per payment form (CUE/EFE/CHE) passed through (ref33).",
+   "edgeCases": [
+    "Commission of 0 or NULL: step skipped entirely",
+    "Lines 1716-1730 (commit and return on @w_cod_errord != 0) are unreachable because the preceding block already returns on any @w_cod_errord != 0"
+   ],
+   "confidence": "High",
+   "suspectedDefect": "Lines 1716-1730 are dead code after REF44; the failed-commission movement at 1628-1694 is written after the rollback and is therefore auto-committed independently."
+  },
+  {
+   "name": "Second SWIFT commission is debited as affectation type 16",
+   "category": "Lifecycle",
+   "priority": "P1",
+   "source": "sp_debcred_empresa.sp:1742-1856 ; also sp_debcred_empresa.sp:1742-1856 ; also sp_debcred_empresa.sp:1742-1856",
+   "plainEnglish": "For SWIFT transfers with a second commission value, an additional commission debit is generated with affectation type '16' using the original order reference; failure aborts with the returned error or 122003.",
+   "given": "Service TRANSWIFT, @i_valor2_swift = 15.00",
+   "when": "After the main commission step",
+   "then": "sp_grb_comision is called with 15.00, @i_tipoafec='16', @i_valor_tarifa=15.00; error -> rollback and 122003 (or the routine's own code)",
+   "parameters": "Trigger: isnull(@i_valor2_swift,0) > 0 AND service = 'TRANSWIFT'. Affectation '16'. Error 122003.",
+   "edgeCases": [
+    "Non-TRANSWIFT services ignore @i_valor2_swift for debiting but still add it to the notification cost (line 980)"
+   ],
+   "confidence": "High"
+  },
+  {
+   "name": "Order header transitions from Initial to In-Transition by channel, option and payment form",
+   "category": "Lifecycle",
+   "priority": "P0",
+   "source": "sp_debcred_empresa.sp:1876-2090 ; also sp_debcred_empresa.sp:1876-2090 ; also sp_debcred_empresa.sp:1876-2070",
+   "plainEnglish": "After a successful debit and commission, the order's total record moves from state 'I' to 'T' for the payment forms implied by the channel and option; if no row is updated, the operation fails with 122004 unless the service is exempt or it is an SPI return.",
+   "given": "Channel 'DIR', option '02', service ROLPAGO, order 555 with bp_total_orden rows in state 'I' for payment forms CUE/EFE",
+   "when": "The header update runs",
+   "then": "Rows for order 555 with te_frm_pagcob in ('CUE','EFE','CHL') and te_estado_proceso 'I' (or NULL) are set to 'T' with the error code; if none updated (live or history), error 122004",
+   "parameters": "Direct channels: 'DIR','SFR','FR2','BTH','VEN'. Option '01' -> payment form = @i_frm_pagcob_deb (defaults to @i_frm_pagcob); '02' -> ('CUE','EFE','CHL'); '03' -> ('CUE','EFE','CHE'). Other channels -> ('COB','TRC','CTB','CPD','TPD'). Exempt from 122004: 'TRANSWIFT','IMPADUAN','PAGIESS','TRANSQUICK','TRANSBIMO','PAGOPRV' and SPI returns (@w_act_totord='N'). Falls back to db_sat_his..bp_total_orden_his.",
+   "edgeCases": [
+    "Direct channel with option not in 01/02/03: no update is attempted and @wRowdbBiz retains its prior value, so 122004 may not fire",
+    "NULL te_estado_proceso is treated as 'I'"
+   ],
+   "confidence": "High"
+  },
+  {
+   "name": "Debit reference text depends on the service",
+   "category": "Policy",
+   "priority": "P2",
+   "source": "sp_debcred_empresa.sp:422-450 ; also sp_debcred_empresa.sp:422-450",
+   "plainEnglish": "The reference stamped on the debit note is the company order number, except for TRANSWIFT where it is 'COD:' plus the SWIFT code.",
+   "given": "Company order 12345 for service TRANSWIFT with SWIFT code ABC123",
+   "when": "the debit note reference is built",
+   "then": "reference = 'COD:ABC123'; for any other service reference = '12345'",
+   "parameters": "Prefix 'COD:'; SPI returns (affectation '12') also use the order number (line 612)",
+   "edgeCases": [
+    "TRANSWIFT with null @i_cod_swift yields a NULL reference (string concatenation with null)"
+   ],
+   "confidence": "High"
+  },
+  {
+   "name": "Only current, savings, virtual and accounting account types may be debited",
+   "category": "Validation",
+   "priority": "P0",
+   "source": "sp_debcred_empresa.sp:414-740 ; also sp_debcred_empresa.sp:414-1322 ; also sp_debcred_empresa.sp:414-416",
+   "plainEnglish": "The company account is debited through a debit note for current (3), savings (4) or virtual (12) accounts, through an accounting service transaction for type 9, and any other account type is rejected with error 122001.",
+   "given": "An order debiting account type 12 (virtual) for 100.00",
+   "when": "the debit is executed",
+   "then": "cob_virtuales..sp_vi_ndc_automatica is called with account-state verification 'S', channel 'SAT' and batch flag; for types 3/4 sp_ndc_ahcc is called; for type 9 db_biz_pagos..sp_graba_tran_servicio is called (lines 1264-1300); for any other type @w_cod_errord = 122001",
+   "parameters": "Allowed types: 3, 4, 12 (debit note), 9 (accounting); error 122001; virtual account debit forces @i_canal='SAT' and @i_verf_estado_cta='S'; batch flag = 1 when @i_aplcobis='N', 0 when 'S'",
+   "edgeCases": [
+    "Type 9 accounting debit sends the company id as @i_tipo_chequera and indicator 1",
+    "Comment at 1314 says allowed types are 3, 4, 9 but code also allows 12"
+   ],
+   "confidence": "High"
+  },
+  {
+   "name": "SPI returns are posted under the original order's service and skip header update",
+   "category": "Policy",
+   "priority": "P1",
+   "source": "sp_debcred_empresa.sp:1348-1380 ; also sp_debcred_empresa.sp:1348-1380",
+   "plainEnglish": "For an SPI return (affectation '12'), the movement is recorded under the service of the original order (looked up from bp_orden or its history) and the order-header total is not required to be updated.",
+   "given": "Service SPI, affectation '12', original order 777 whose service was TRANSCLI",
+   "when": "the movement is about to be recorded",
+   "then": "@i_servicio becomes 'TRANSCLI' and @w_act_totord = 'N' so no 122004 error is raised if no header row changes",
+   "parameters": "Affectation '12' = SPI return; falls back to db_sat_his..bp_orden_his when not in bp_orden",
+   "confidence": "High"
+  },
+  {
+   "name": "No header row updated is an error except for exempted services",
+   "category": "Validation",
+   "priority": "P1",
+   "source": "sp_debcred_empresa.sp:2076-2090",
+   "plainEnglish": "If the header update touched no row, the order fails with 122004 unless the service is one that is not tracked in the order header or it is an SPI return.",
+   "given": "Service ROLPAGO, header update affected 0 rows in both live and history tables",
+   "when": "the post-update check runs",
+   "then": "error 122004 is raised and the whole transaction is rolled back; for TRANSWIFT, IMPADUAN, PAGIESS, TRANSQUICK, TRANSBIMO, PAGOPRV, or when @w_act_totord = 'N', processing commits normally",
+   "parameters": "Exempt services: TRANSWIFT, IMPADUAN, PAGIESS, TRANSQUICK, TRANSBIMO, PAGOPRV; error 122004",
+   "confidence": "High"
+  },
+  {
+   "name": "Interbank services debit the ordered value and map beneficiary account type to credit product",
+   "category": "Calculation",
+   "priority": "P1",
+   "source": "sp_debcred_empresa.sp:878-976",
+   "plainEnglish": "For TRANSCLI, TARJCRED and COMEXT the debit value is replaced by the ordered value, the commission is the combined commission field, and the beneficiary's account type is translated to a credit product code for notification.",
+   "given": "Service TRANSCLI, ordered value 250.00, debit value 251.20, beneficiary account type 4",
+   "when": "notification data is prepared",
+   "then": "@i_valor_debito = 250.00, @w_valor_comision = @i_comision, credit product 'AHO', beneficiary bank taken from catalog ad_cuentas_bce",
+   "parameters": "Account type to product: 0 -> null, 3 -> CTE, 4 -> AHO, 8 -> ESP, 9 -> CON; services TRANSCLI, TARJCRED, COMEXT",
+   "edgeCases": [
+    "Because @i_valor_debito is overwritten here, the movement recorded at line 1424 uses the ordered value rather than the original debit value for these services",
+    "Types 8/9 mapping applies to any service (outside the if-block)"
+   ],
+   "confidence": "Medium",
+   "smeQuestion": "Is it intended that for TRANSCLI/TARJCRED/COMEXT the recorded movement value becomes the ordered value (excluding commission) rather than the debited value passed in?"
+  },
+  {
+   "name": "Error reporting mode depends on invocation context",
+   "category": "Policy",
+   "priority": "P1",
+   "source": "sp_debcred_empresa.sp:2140-2170 ; also sp_debcred_empresa.sp:2140-2170",
+   "plainEnglish": "Fatal errors roll back everything; when invoked from COBIS online the error is raised through the central error handler and returned as the return code, while batch invocations return 0 and pass the error in the output parameter.",
+   "given": "A fatal error 122004 with @i_aplcobis = 'N'",
+   "when": "lbl_error is reached",
+   "then": "Transaction rolled back, @o_error = 122004, return value 0; with @i_aplcobis = 'S', cobis..sp_cerror is called and the return value is 122004",
+   "parameters": "Error codes: 120000 no accounting config, 122001 invalid account type, 122002 movement record failure, 122003 commission debit failure, 122004 order header not updated",
+   "confidence": "High"
+  },
+  {
+   "name": "Accounting concept selected by service and basic-account status",
+   "category": "Policy",
+   "priority": "P1",
+   "source": "sp_debcred_empresa.sp:278-312 ; also sp_debcred_empresa.sp:278-312",
+   "plainEnglish": "Before looking up the accounting configuration, the concept code is taken from the terminal field for SPI orders, or set to '91' when the debited virtual account is a basic account (banking product 13), otherwise '0'.",
+   "given": "A debit against virtual account type 12 whose cob_virtuales..vi_cuenta row has vi_prod_banc = 13, for a non-SPI service",
+   "when": "The procedure resolves the accounting concept before calling sp_con_confcontable",
+   "then": "Concept '91' is passed to the accounting-configuration lookup; for a non-basic virtual, current or savings account the concept is '0'",
+   "parameters": "Basic-account banking product = 13; basic concept = '91'; default concept = '0'; SPI: concept = @s_term (then @s_term is blanked to ' ')",
+   "edgeCases": [
+    "SPI service: concept comes from @s_term and the terminal field is reset to a single space, so downstream debit-note calls receive a blank terminal",
+    "Basic-account check only runs for account type 12; types 3/4 always get '0'"
+   ],
+   "confidence": "Medium",
+   "smeQuestion": "Is it intended that SPI callers overload the terminal parameter (@s_term) to carry the accounting concept, and that the terminal is blanked afterwards for the debit-note record? | For SPI, is the terminal parameter deliberately overloaded to carry the accounting concept (who sets it upstream), and should the modernized system model it as an explicit 'concept' input instead?",
+   "suspectedDefect": "The SPI branch (282-284) repurposes the session terminal parameter as business data and then blanks it, so movements for SPI are recorded with a blank terminal."
+  },
+  {
+   "name": "TRANSQUICK orders with an SPI payment form use that form for accounting lookup and commission",
+   "category": "Policy",
+   "priority": "P1",
+   "source": "sp_debcred_empresa.sp:320-346 ; also sp_debcred_empresa.sp:320-346",
+   "plainEnglish": "For TRANSQUICK, when an SPI payment form is supplied, the accounting transaction/causal and the separate commission are resolved under the SPI payment form instead of the order's own payment form.",
+   "given": "Service TRANSQUICK with @i_frm_pagcob = 'CUE' and @i_frm_pagcob_spi = 'COB'",
+   "when": "The accounting configuration is looked up and later the separate commission is charged",
+   "then": "sp_con_confcontable is called with payment form 'COB' (without the basic concept), and before sp_grb_comision @i_frm_pagcob is overwritten with 'COB' (line 1500-1502); the header-status update still uses the original form via @i_frm_pagcob_deb",
+   "parameters": "Service = 'TRANSQUICK'; SPI form passed through when not null; @i_frm_pagcob_deb defaults to @i_frm_pagcob (line 262)",
+   "edgeCases": [
+    "TRANSQUICK without SPI form follows the normal path with the basic concept",
+    "The SPI form is also passed to sp_ndc_ahcc as @i_frm_pagcob for all services (line 716)"
+   ],
+   "confidence": "High"
+  },
+  {
+   "name": "TRANSBIMO tariff equals its separate commission",
+   "category": "Calculation",
+   "priority": "P1",
+   "source": "sp_debcred_empresa.sp:1506-1508",
+   "plainEnglish": "For the TRANSBIMO service the tariff value sent to the commission routine is forced to the separate commission amount, ignoring any tariff supplied by the caller.",
+   "given": "Service TRANSBIMO with @i_valor_comision = 2.50 and @i_valor_tarifa = 1.00",
+   "when": "The separate commission is about to be charged",
+   "then": "sp_grb_comision receives @i_valor_tarifa = 2.50 along with the per-form tariff/commission pairs (cue/efe/che) unchanged",
+   "parameters": "Service = 'TRANSBIMO'; REF33 per-payment-form tariff/commission inputs: tarifa, comision_cue, tarifa_efe, comision_efe, tarifa_che, comision_che are passed through untouched",
+   "edgeCases": [
+    "Other services pass the caller's tariff as-is (may be null)"
+   ],
+   "confidence": "Medium",
+   "smeQuestion": "Why does TRANSBIMO override the tariff with the commission value, and should the per-form (cue/efe/che) tariff pairs also be derived for it?"
+  },
+  {
+   "name": "Notification channel and SMS service resolved from the order channel and catalogue",
+   "category": "Policy",
+   "priority": "P1",
+   "source": "sp_debcred_empresa.sp:760-814",
+   "plainEnglish": "After a successful debit (except PAGOPRV) the notification channel is normalised (DIR/SAT to SAT, BNK to IBK '24OnLine', VEN 'Ventanilla') and a notification is only attempted if an active ad_servicios_sms catalogue entry matches the service and that channel.",
+   "given": "A successful debit on channel 'BNK' for service 'TRANSCLI' with an active catalogue entry 'TRC-IBK' whose name contains 'TRANSCLI'",
+   "when": "The post-debit notification step runs",
+   "then": "Channel becomes 'IBK', description '24OnLine', SMS service 'TRC', and the notification flow proceeds; with no matching catalogue entry nothing is sent",
+   "parameters": "Channel map: DIR,SAT -> SAT/'SAT'; BNK -> IBK/'24OnLine'; VEN -> VEN/'Ventanilla'; catalogue table 'ad_servicios_sms', code format '<svc>-<canal>', status 'A'; excluded service 'PAGOPRV'",
+   "edgeCases": [
+    "Catalogue match uses LIKE '%service%' so a service name contained in another (e.g. 'SPI' within another name) could match the wrong row",
+    "Channels other than DIR/SAT/BNK/VEN keep their code with a null description"
+   ],
+   "confidence": "High"
+  },
+  {
+   "name": "Notification is routed to basic-account notifier or event engine by service classification",
+   "category": "Policy",
+   "priority": "P1",
+   "source": "sp_debcred_empresa.sp:994-1094 ; also sp_debcred_empresa.sp:994-1094",
+   "plainEnglish": "Services flagged 'B' in the ad_notificacion_basica catalogue notify via pa_sat_pnotificacion with beneficiary data; all other services (defaulting to 'OTRO') raise a cob_internet event with debtor and creditor product codes.",
+   "given": "Service 'ROLPAGO' listed with other-field 'B' in ad_notificacion_basica",
+   "when": "A successful debit reaches the notification step with a matching SMS service",
+   "then": "pa_sat_pnotificacion is invoked with the ordered value, the separate commission, beneficiary name and group reference from bp_detalle (falling back to history); for a service not in the catalogue the sp_eventos path is used instead",
+   "parameters": "Catalogue 'ad_notificacion_basica'; classification values 'B' and default 'OTRO'; event value = debit value, event cost = separate commission + second SWIFT value (lines 980-986)",
+   "edgeCases": [
+    "A catalogue value other than 'B' or 'OTRO' sends no notification at all",
+    "Order detail lookups fall back to db_sat_his history tables when not found in live tables"
+   ],
+   "confidence": "High"
+  },
+  {
+   "name": "Event notification identifies debtor product and client, treating basic virtual accounts as savings",
+   "category": "Calculation",
+   "priority": "P2",
+   "source": "sp_debcred_empresa.sp:1102-1154 ; also sp_debcred_empresa.sp:1102-1154",
+   "plainEnglish": "For the event-engine notification the debtor product is CTE for current, AHO for savings, and for virtual accounts VIR unless the account is a basic account (product 13) which is reported as AHO; the client id is read from the respective account master.",
+   "given": "Debit from virtual account type 12 with vi_prod_banc = 13",
+   "when": "The sp_eventos notification is built",
+   "then": "@i_prod_deb = 'AHO' and @i_cliente = vi_cliente of that account",
+   "parameters": "Type 3 -> 'CTE' (cc_ctacte); type 4 -> 'AHO' (ah_cuenta); type 12 -> 'VIR' or 'AHO' when vi_prod_banc = 13; credit product from beneficiary type: 3 CTE, 4 AHO, 8 ESP, 9 CON, 0 none (lines 944-974)",
+   "edgeCases": [
+    "Credit product mapping for types 8/9 is evaluated for every service, but @w_tip_cta is only populated in the TRANSCLI/TARJCRED/COMEXT branch"
+   ],
+   "confidence": "High"
+  },
+  {
+   "name": "Stray result set and debit-value override for TRANSCLI/TARJCRED/COMEXT",
+   "category": "Validation",
+   "priority": "P2",
+   "source": "sp_debcred_empresa.sp:882-886",
+   "plainEnglish": "The code emits an unnamed result set of commission and ordered value before overriding the debit value; this appears to be leftover debugging output.",
+   "given": "Service TRANSCLI called from an application expecting only output parameters",
+   "when": "The notification step for TRANSCLI runs",
+   "then": "A two-column result set (@i_comision, @i_valor_ordenado) is returned to the caller in addition to the normal outputs",
+   "parameters": "Services: TRANSCLI, TARJCRED, COMEXT",
+   "edgeCases": [],
+   "confidence": "High",
+   "suspectedDefect": "Line 882 'select @i_comision, @i_valor_ordenado' is a bare SELECT that returns a result set to the caller; likely debug leftover that may break callers that read result sets."
+  },
+  {
+   "name": "Notification is sent only when an active SMS-service mapping exists for the service and channel",
+   "category": "Validation",
+   "priority": "P1",
+   "source": "sp_debcred_empresa.sp:798-816",
+   "plainEnglish": "After a successful debit (except PAGOPRV), the customer is notified only if the 'ad_servicios_sms' catalogue has an active entry whose name contains the service and whose code ends with the notification channel; otherwise no notification of any kind is produced.",
+   "given": "A successful debit for service 'TRANSCLI' through channel 'BNK' (mapped to notification channel 'IBK')",
+   "when": "The catalogue ad_servicios_sms is searched for an active entry with name like '%TRANSCLI%' and code ending in 'IBK'",
+   "then": "If found, the SMS service code is the part of the catalogue code before the '-' and the notification flow continues; if not found, the debit completes with no notification",
+   "parameters": "Catalogue table 'ad_servicios_sms'; status 'A'; service code = substring before first '-'; channel suffix = last 3 chars of code; PAGOPRV is always excluded (line 746)",
+   "edgeCases": [
+    "PAGOPRV never notifies regardless of catalogue",
+    "Channel DIR or SAT is normalised to 'SAT' (desc 'SAT'); BNK to 'IBK' (desc '24OnLine'); VEN keeps 'VEN' (desc 'Ventanilla'); any other channel is used as-is with no description (lines 760-794)",
+    "Match uses LIKE '%service%', so a service name that is a substring of another (e.g. 'SPI' inside another entry) could match the wrong catalogue row"
+   ],
+   "confidence": "High"
+  },
+  {
+   "name": "Generic notification is suppressed by the SAT block list or for BCE payroll without a debit account",
+   "category": "Policy",
+   "priority": "P1",
+   "source": "sp_debcred_empresa.sp:1162-1208 ; also sp_debcred_empresa.sp:1162-1208",
+   "plainEnglish": "The generic event notification is not raised when an active entry in 'ba_bloqueaNotificacionSAT' matches 'service-smsService' and the calling procedure name, nor when the channel is BCE, the service is ROLPAGO and no debit account is present.",
+   "given": "A ROLPAGO debit with SMS service 'ROL' invoked from procedure 'sp_x', and an active block-list entry named 'ROLPAGO-ROL' with other-field 'sp_x'",
+   "when": "The generic notification step evaluates the block list",
+   "then": "The event is not created; the debit is still recorded as successful",
+   "parameters": "Catalogue 'ba_bloqueaNotificacionSAT'; key = rtrim(service) + '-' + rtrim(smsService); other field = calling SP name; status 'A'; BCE exception requires channel 'BCE', service 'ROLPAGO' and null account",
+   "edgeCases": [
+    "Block-list match is per calling procedure, so the same service may notify from one caller and not from another",
+    "BCE exception can never trigger via the normalised channel values (DIR/SAT/BNK/VEN) — only when the raw channel is literally 'BCE'",
+    "Debit account null with tipcta 3/4/12 would already have failed the debit, so the BCE exception is practically limited to ledger-account (type 9) flows — SME to confirm"
+   ],
+   "confidence": "Medium",
+   "smeQuestion": "Is the BCE/ROLPAGO/no-account exception still reachable in production, and is the block list intended to be keyed by the calling procedure name?"
+  },
+  {
+   "name": "Notification cost equals separate commission plus the second SWIFT value",
+   "category": "Calculation",
+   "priority": "P2",
+   "source": "sp_debcred_empresa.sp:980-986",
+   "plainEnglish": "The cost reported in the customer notification is the commission attributable to the order plus the second SWIFT commission, and the notified amount is the debit value.",
+   "given": "A TRANSWIFT order with separate commission 12.00 and second SWIFT value 5.00, debit value 1,000.00",
+   "when": "The notification amounts are prepared",
+   "then": "Notified value = 1000.00 and notified cost = 17.00",
+   "parameters": "cost = isnull(w_valor_comision,0) + isnull(i_valor2_swift,0); for TRANSWIFT w_valor_comision = i_valor_comision, for TRANSCLI/TARJCRED/COMEXT it is i_comision, otherwise null (0)",
+   "edgeCases": [
+    "For services outside TRANSWIFT/TRANSCLI/TARJCRED/COMEXT the commission component is 0 and only valor2_swift contributes",
+    "Values are converted to varchar(11): amounts of 100,000,000.00 or more would be truncated"
+   ],
+   "confidence": "High"
+  },
+  {
+   "name": "Order data is read from the live payments database first and from the SAT history database when the order has already been archived",
+   "category": "Policy",
+   "priority": "P1",
+   "source": "sp_debcred_empresa.sp:1352-1370",
+   "plainEnglish": "Whenever the procedure needs order header or detail data (originating service of an SPI return, beneficiary/institution for notifications, order-header state update), it looks in the live db_biz_pagos tables and, if no row is found, repeats the lookup or update against the db_sat_his history tables.",
+   "given": "An SPI return (affectation 12) for order 5001 which has been moved to bp_orden_his",
+   "when": "The originating service is resolved",
+   "then": "or_servicio is taken from db_sat_his..bp_orden_his and the movement is attributed to that service",
+   "parameters": "Live: db_biz_pagos..bp_orden / bp_detalle / bp_total_orden; history: db_sat_his..bp_orden_his / bp_detalle_his / bp_total_orden_his; same pattern at 824-860, 890-938, 1026-1048, 1902-1924, 1952-1974, 2000-2022, 2046-2068",
+   "edgeCases": [
+    "If the order exists in neither, the SPI return keeps service null and the header update affects zero rows (which is tolerated for SPI returns because act_totord = 'N')",
+    "History header update is attempted only when the live update touched zero rows, so an order present in both is updated once (live)"
+   ],
+   "confidence": "High"
+  },
+  {
+   "name": "Debit payment form defaults to the order payment form, and TRANSQUICK commissions use the SPI payment form when supplied",
+   "category": "Policy",
+   "priority": "P1",
+   "source": "sp_debcred_empresa.sp:1500-1502",
+   "plainEnglish": "If no specific debit payment form is given, the order's payment form is used to select which header rows move to Transition; for TRANSQUICK, when an SPI payment form is supplied, it replaces the payment form used to resolve the separate-commission accounting configuration.",
+   "given": "A TRANSQUICK order with payment form 'CUE' and SPI payment form 'COB', and no explicit debit payment form",
+   "when": "The main debit finishes and the commission step starts",
+   "then": "The header update (option 01) targets rows with te_frm_pagcob = 'CUE'; the commission transaction/causal is looked up with payment form 'COB'",
+   "parameters": "i_frm_pagcob_deb = isnull(i_frm_pagcob_deb, i_frm_pagcob) at line 262; override only when service = 'TRANSQUICK' and i_frm_pagcob_spi is not null",
+   "edgeCases": [
+    "Override happens after the main movement was recorded, so the main movement keeps the original payment form while the commission uses the SPI one",
+    "Other services ignore i_frm_pagcob_spi entirely"
+   ],
+   "confidence": "Medium",
+   "smeQuestion": "Is it intended that only TRANSQUICK uses the SPI payment form for the commission configuration, while the main debit record keeps the original payment form?"
+  },
+  {
+   "name": "Order header state update falls back to the historical order table and treats a null state as Initial",
+   "category": "Lifecycle",
+   "priority": "P1",
+   "source": "sp_debcred_empresa.sp:1898-1924",
+   "plainEnglish": "When moving an order header from Initial to In-Transition, a row whose process state is null is treated as Initial, and if no matching row exists in the live order table the same transition is attempted on the historical (SAT) order table before deciding that nothing was updated.",
+   "given": "Order 5001 whose header row has already been archived to db_sat_his..bp_total_orden_his with te_estado_proceso null",
+   "when": "The debit succeeds and the header transition runs",
+   "then": "The live update affects 0 rows, the historical row is updated to state 'T' with the debit error code, and the 'no header updated' error 122004 is not raised",
+   "parameters": "Initial state = 'I' (null coerced to 'I'); target state = 'T'; live table = bp_total_orden; fallback table = db_sat_his..bp_total_orden_his",
+   "edgeCases": [
+    "A header already in state 'T' or any non-Initial state is not updated (idempotence guard) and, if nothing else matches, triggers error 122004 unless the service is exempted",
+    "The same live-then-history fallback is used to find the originating service of an SPI refund (lines 1352-1370)",
+    "Channel list for the option-based branch includes DIR, SFR, FR2, BTH and VEN; other channels use the collection payment-form set COB/TRC/CTB/CPD/TPD"
+   ],
+   "confidence": "High"
+  },
+  {
+   "name": "A failed debit note is committed as a recorded failure and returned as an output error code, not as a procedure error",
+   "category": "Lifecycle",
+   "priority": "P1",
+   "source": "sp_debcred_empresa.sp:1480-1492",
+   "plainEnglish": "If the debit note itself failed, the order's movement is still persisted with status X and the error code, the transaction is committed, and the debit-note error code is returned to the caller in the output parameter, bypassing the general error handler (so no rollback and no COBIS error message even when invoked from COBIS).",
+   "given": "A debit on account type 5 (not allowed) producing debit error 122001",
+   "when": "The movement with status 'X' has been recorded successfully",
+   "then": "The transaction is committed, @o_error = 122001 and the procedure returns 122001 without calling the COBIS error routine; if instead recording the movement fails, error 122002 goes through the rollback path",
+   "parameters": "success status = 'P'; failure status = 'X'; account-type error = 122001; movement-recording error = 122002",
+   "edgeCases": [
+    "Return value equals the error code on this path, whereas the normal error path returns 0 when @i_aplcobis = 'N' — callers must handle both conventions",
+    "Comment at line 1314 says allowed types are 3, 4 or 9 while the code at 414 allows 3, 4 and 12"
+   ],
+   "confidence": "High",
+   "suspectedDefect": "Inconsistent return convention: this path returns the error code as the procedure's return value while the lbl_error path returns 0 with @o_error set when not invoked from COBIS."
+  }
+ ],
+ "foldedRules": [
+  {
+   "name": "Commission carried in the combined field is moved to the separate-commission field",
+   "source": "sp_debcred_empresa.sp:188-196",
+   "into": "Combined commission is normalized into a separate commission when no separate value is supplied"
+  },
+  {
+   "name": "Commission bundled with the debit is converted to a separate commission",
+   "source": "sp_debcred_empresa.sp:188-196",
+   "into": "Combined commission is normalized into a separate commission when no separate value is supplied"
+  },
+  {
+   "name": "Debit-side product code for notifications is derived from the account type, with virtual accounts of banking product 13 ",
+   "source": "sp_debcred_empresa.sp:1102-1154",
+   "into": "Event notification identifies debtor product and client, treating basic virtual accounts as savings"
+  },
+  {
+   "name": "Per-transaction commission unit and record count derived from the company tariff",
+   "source": "sp_debcred_empresa.sp:204-248",
+   "into": "Number of billable transactions is derived from commission amount divided by configured per-transaction fee"
+  },
+  {
+   "name": "Unit commission and transaction count derived from company per-transaction tariff",
+   "source": "sp_debcred_empresa.sp:204-248",
+   "into": "Number of billable transactions is derived from commission amount divided by configured per-transaction fee"
+  },
+  {
+   "name": "Debit outcome determines process status and whether the debit is kept",
+   "source": "sp_debcred_empresa.sp:1332-1492",
+   "into": "Debit outcome sets process status, rolls back on failure, and the movement is always recorded"
+  },
+  {
+   "name": "Debit-note failure rolls back to the savepoint and records the movement with status X",
+   "source": "sp_debcred_empresa.sp:1332-1492",
+   "into": "Debit outcome sets process status, rolls back on failure, and the movement is always recorded"
+  },
+  {
+   "name": "A positive commission is debited as a separate 'COBRO DE COMISION' movement; failure reverses the whole order",
+   "source": "sp_debcred_empresa.sp:1500-1732",
+   "into": "Separate commission is debited as its own movement; failure rolls back the whole debit"
+  },
+  {
+   "name": "Separate commission debit and its failure handling",
+   "source": "sp_debcred_empresa.sp:1500-1732",
+   "into": "Separate commission is debited as its own movement; failure rolls back the whole debit"
+  },
+  {
+   "name": "Debit posting routed by the company account type",
+   "source": "sp_debcred_empresa.sp:414-1322",
+   "into": "Only current, savings, virtual and accounting account types may be debited"
+  },
+  {
+   "name": "Only current, savings, virtual or accounting company accounts may be debited",
+   "source": "sp_debcred_empresa.sp:414-416",
+   "into": "Only current, savings, virtual and accounting account types may be debited"
+  },
+  {
+   "name": "Order header moves from Initial to Transition after successful debit",
+   "source": "sp_debcred_empresa.sp:1876-2090",
+   "into": "Order header transitions from Initial to In-Transition by channel, option and payment form"
+  },
+  {
+   "name": "Order header moves from Initial to Transition for the matching payment forms",
+   "source": "sp_debcred_empresa.sp:1876-2070",
+   "into": "Order header transitions from Initial to In-Transition by channel, option and payment form"
+  },
+  {
+   "name": "Second SWIFT commission charged for international transfers",
+   "source": "sp_debcred_empresa.sp:1742-1856",
+   "into": "Second SWIFT commission is debited as affectation type 16"
+  },
+  {
+   "name": "TRANSWIFT second commission posted as affectation 16",
+   "source": "sp_debcred_empresa.sp:1742-1856",
+   "into": "Second SWIFT commission is debited as affectation type 16"
+  },
+  {
+   "name": "SPI refunds are attributed to the originating service and skip order-header update",
+   "source": "sp_debcred_empresa.sp:1348-1380",
+   "into": "SPI returns are posted under the original order's service and skip header update"
+  },
+  {
+   "name": "Accounting concept is derived from account class: basic virtual accounts use concept 91, SPI reuses the terminal field a",
+   "source": "sp_debcred_empresa.sp:278-312",
+   "into": "Accounting concept selected by service and basic-account status"
+  },
+  {
+   "name": "Company 1295 SPI debits on accounting accounts are recorded as balance, not value",
+   "source": "sp_debcred_empresa.sp:1270-1280",
+   "into": "Accounting-account debits for company 1295 on SPI are booked as balance instead of value"
+  },
+  {
+   "name": "Ledger-account SPI debits for company 1295 are recorded as balance only",
+   "source": "sp_debcred_empresa.sp:1264-1300",
+   "into": "Accounting-account debits for company 1295 on SPI are booked as balance instead of value"
+  },
+  {
+   "name": "Debit-note reference string depends on service",
+   "source": "sp_debcred_empresa.sp:422-450",
+   "into": "Debit reference text depends on the service"
+  },
+  {
+   "name": "Error reporting mode depends on COBIS invocation flag",
+   "source": "sp_debcred_empresa.sp:2140-2170",
+   "into": "Error reporting mode depends on invocation context"
+  },
+  {
+   "name": "Event notification suppressed by block catalogue or for BCE payroll without debit account",
+   "source": "sp_debcred_empresa.sp:1162-1208",
+   "into": "Generic notification is suppressed by the SAT block list or for BCE payroll without a debit account"
+  },
+  {
+   "name": "IMPADUAN debits for CORPEI use a dedicated causal",
+   "source": "sp_debcred_empresa.sp:456-550",
+   "into": "IMPADUAN debits for CORPEI use the NDCORPEI accounting concept with fallback causal 512"
+  },
+  {
+   "name": "IMPADUAN orders for CORPEI use the NDCORPEI concept causal, defaulting to 512",
+   "source": "sp_debcred_empresa.sp:456-550",
+   "into": "IMPADUAN debits for CORPEI use the NDCORPEI accounting concept with fallback causal 512"
+  },
+  {
+   "name": "Notification type is chosen from the basic-notification catalogue: 'B' sends a structured payment notification, otherwis",
+   "source": "sp_debcred_empresa.sp:994-1094",
+   "into": "Notification is routed to basic-account notifier or event engine by service classification"
+  },
+  {
+   "name": "Post-debit customer notification (SMS/event) by service and channel",
+   "source": "sp_debcred_empresa.sp:746-1254",
+   "into": "Successful debits trigger a customer notification event with channel and product mapping, unless blocked"
+  },
+  {
+   "name": "Successful debit triggers a customer notification event unless blocked",
+   "source": "sp_debcred_empresa.sp:746-1246",
+   "into": "Successful debits trigger a customer notification event with channel and product mapping, unless blocked"
+  },
+  {
+   "name": "TRANSQUICK debits resolve accounting configuration by the SPI payment form when one is supplied",
+   "source": "sp_debcred_empresa.sp:320-346",
+   "into": "TRANSQUICK orders with an SPI payment form use that form for accounting lookup and commission"
+  },
+  {
+   "name": "Accounting transaction and causal must be resolved from the accounting configuration before any debit",
+   "source": "sp_debcred_empresa.sp:278-394",
+   "into": "Accounting transaction code and causal are resolved from the accounting configuration; missing configuration aborts the "
+  },
+  {
+   "name": "An accounting configuration (transaction code and causal) must exist for the debit",
+   "source": "sp_debcred_empresa.sp:278-394",
+   "into": "Accounting transaction code and causal are resolved from the accounting configuration; missing configuration aborts the "
+  }
+ ],
+ "rejectedRules": [],
+ "unverifiedRules": [],
+ "rerunModules": [],
+ "dataObjects": [
+  {
+   "name": "DebitRequest (sp_debcred_empresa parameter block)",
+   "source": "legacy/debcred/sp_debcred_empresa.sp:4",
+   "fields": [
+    {
+     "name": "@s_ssn",
+     "type": "int",
+     "note": "session sequence; defaulted to 0 at :266"
+    },
+    {
+     "name": "@s_user",
+     "type": "varchar(14)"
+    },
+    {
+     "name": "@s_term",
+     "type": "varchar(30)",
+     "note": "for SPI it carries the basic-account concept and is blanked (:278-286)"
+    },
+    {
+     "name": "@s_srv",
+     "type": "varchar(30)"
+    },
+    {
+     "name": "@s_ofi",
+     "type": "smallint"
+    },
+    {
+     "name": "@i_aplcobis",
+     "type": "char(1)",
+     "note": "'S'/'N'; drives @w_batch (:176-178) and error mode (:2148)"
+    },
+    {
+     "name": "@i_sp_name",
+     "type": "varchar(32)",
+     "note": "caller name; used in SAT block-list lookup (:1178) and sp_cerror"
+    },
+    {
+     "name": "@i_orden",
+     "type": "int",
+     "note": "bank order number (or_orden_banco)"
+    },
+    {
+     "name": "@i_orden_empresa",
+     "type": "int",
+     "note": "company order number; default reference text (:422)"
+    },
+    {
+     "name": "@i_fecha_proceso",
+     "type": "datetime"
+    },
+    {
+     "name": "@i_nem_emp",
+     "type": "char(15)",
+     "note": "company mnemonic"
+    },
+    {
+     "name": "@i_empresa",
+     "type": "int"
+    },
+    {
+     "name": "@i_producto",
+     "type": "smallint"
+    },
+    {
+     "name": "@i_servicio",
+     "type": "varchar(10)",
+     "note": "service code (TRANSWIFT, IMPADUAN, SPI, TRANSQUICK, TRANSBIMO, TRANSCLI, TARJCRED, COMEXT, PAGOPRV, ROLPAGO...); overwritten at :1374 for SPI returns"
+    },
+    {
+     "name": "@i_frm_pagcob",
+     "type": "char(3)",
+     "note": "payment form; overwritten with @i_frm_pagcob_spi for TRANSQUICK at :1502"
+    },
+    {
+     "name": "@i_frm_pagcob_spi",
+     "type": "char(3)",
+     "note": "optional SPI payment form"
+    },
+    {
+     "name": "@i_canal",
+     "type": "char(3)",
+     "note": "default 'DIR'"
+    },
+    {
+     "name": "@i_tipo_afec",
+     "type": "char(2)",
+     "note": "affectation type, default '10'; '12' = SPI return"
+    },
+    {
+     "name": "@i_referencia",
+     "type": "varchar(100)"
+    },
+    {
+     "name": "@i_mon_debito",
+     "type": "smallint",
+     "note": "currency; converted to char(2) @w_moneda (:254)"
+    },
+    {
+     "name": "@i_pais_cta",
+     "type": "smallint"
+    },
+    {
+     "name": "@i_cod_banco_cta",
+     "type": "smallint"
+    },
+    {
+     "name": "@i_tipcta_emp",
+     "type": "smallint",
+     "note": "account type: 3 current, 4 savings, 12 virtual, 9 accounting (:414, :1264)"
+    },
+    {
+     "name": "@i_numcta_emp",
+     "type": "char(10)"
+    },
+    {
+     "name": "@i_valor_ordenado",
+     "type": "money"
+    },
+    {
+     "name": "@i_valor_debito",
+     "type": "money",
+     "note": "mutated at :886 and :1278"
+    },
+    {
+     "name": "@i_comision",
+     "type": "money",
+     "note": "combined debit+commission (comment :56); zeroed at :194 when normalized"
+    },
+    {
+     "name": "@i_valor_comision",
+     "type": "money",
+     "note": "separate commission (comment :58)"
+    },
+    {
+     "name": "@i_tipo_referencia",
+     "type": "char(1)",
+     "note": "also passed as @i_tipo_horario to sp_grb_comision (:1582)"
+    },
+    {
+     "name": "@i_tarjeta",
+     "type": "varchar(24)"
+    },
+    {
+     "name": "@i_ref_prov",
+     "type": "varchar(24)",
+     "note": "provider reference / detail"
+    },
+    {
+     "name": "@i_opcion",
+     "type": "char(2)",
+     "note": "'01','02','03' header update variants (:1884-1982)"
+    },
+    {
+     "name": "@i_tipo_pagcob",
+     "type": "char(1)"
+    },
+    {
+     "name": "@i_localidad_orden",
+     "type": "smallint"
+    },
+    {
+     "name": "@i_tipo_proceso",
+     "type": "char(1)"
+    },
+    {
+     "name": "@i_frm_pagcob_deb",
+     "type": "char(3)",
+     "note": "defaults to @i_frm_pagcob (:262)"
+    },
+    {
+     "name": "@i_valor2_swift",
+     "type": "money",
+     "note": "second SWIFT commission, default 0"
+    },
+    {
+     "name": "@i_secuencial",
+     "type": "int",
+     "note": "detail sequence, default 0"
+    },
+    {
+     "name": "@i_cod_swift",
+     "type": "varchar(20)",
+     "note": "SWIFT code; 'CORPEI' sentinel for IMPADUAN (:464)"
+    },
+    {
+     "name": "@o_error",
+     "type": "int output"
+    },
+    {
+     "name": "@o_reg_a_proc",
+     "type": "int output",
+     "note": "declared but never assigned in the body"
+    },
+    {
+     "name": "@i_valor_tarifa",
+     "type": "money",
+     "note": "REF33; set to @i_valor_comision for TRANSBIMO (:1508)"
+    },
+    {
+     "name": "@i_valor_comision_cue",
+     "type": "money"
+    },
+    {
+     "name": "@i_valor_tarifa_efe",
+     "type": "money"
+    },
+    {
+     "name": "@i_valor_comision_efe",
+     "type": "money"
+    },
+    {
+     "name": "@i_valor_tarifa_che",
+     "type": "money"
+    },
+    {
+     "name": "@i_valor_comision_che",
+     "type": "money"
+    }
+   ],
+   "consumedBy": [
+    "Combined commission is normalized into a separate commission when no separate value is supplied",
+    "Number of billable transactions is derived from commission amount divided by configured per-transaction fee",
+    "Accounting transaction code and causal are resolved from the accounting configuration; missing configuration aborts the debit",
+    "IMPADUAN debits for CORPEI use the NDCORPEI accounting concept with fallback causal 512",
+    "Debit note is routed by account type: virtual accounts via automatic virtual NDC, current/savings via standard NDC",
+    "For TRANSCLI, TARJCRED and COMEXT the recorded debit value is replaced by the ordered value",
+    "Accounting-account debits for company 1295 on SPI are booked as balance instead of value",
+    "Second SWIFT commission is debited as affectation type 16",
+    "Order header transitions from Initial to In-Transition by channel, option and payment form",
+    "Debit reference text depends on the service",
+    "Only current, savings, virtual and accounting account types may be debited",
+    "Error reporting mode depends on invocation context",
+    "Accounting concept selected by service and basic-account status",
+    "TRANSQUICK orders with an SPI payment form use that form for accounting lookup and commission",
+    "TRANSBIMO tariff equals its separate commission",
+    "Stray result set and debit-value override for TRANSCLI/TARJCRED/COMEXT",
+    "Notification cost equals separate commission plus the second SWIFT value",
+    "Debit payment form defaults to the order payment form, and TRANSQUICK commissions use the SPI payment form when supplied",
+    "A failed debit note is committed as a recorded failure and returned as an output error code, not as a procedure error"
+   ]
+  },
+  {
+   "name": "AccountingResolution (working context)",
+   "source": "legacy/debcred/sp_debcred_empresa.sp:110",
+   "fields": [
+    {
+     "name": "@w_trn",
+     "type": "int",
+     "note": "transaction code from sp_con_confcontable @o_trn (:342, :372, :522)"
+    },
+    {
+     "name": "@w_causal",
+     "type": "char(4)",
+     "note": "causal from @o_cau; isnull -> '512' for CORPEI (:528)"
+    },
+    {
+     "name": "@w_concepto_bas",
+     "type": "varchar(5)",
+     "note": "'0', '91' (basic account) or @s_term for SPI (:282-306)"
+    },
+    {
+     "name": "@w_concepto",
+     "type": "varchar(10)",
+     "note": "'99999' seed then ct_cod_catalogo for NDCORPEI (:480-494)"
+    },
+    {
+     "name": "@w_moneda",
+     "type": "char(2)",
+     "note": "char form of @i_mon_debito (:254)"
+    },
+    {
+     "name": "@w_batch",
+     "type": "bit",
+     "note": "0 when @i_aplcobis='S', 1 when 'N' (:176-178)"
+    }
+   ],
+   "consumedBy": [
+    "Accounting transaction code and causal are resolved from the accounting configuration; missing configuration aborts the debit",
+    "IMPADUAN debits for CORPEI use the NDCORPEI accounting concept with fallback causal 512",
+    "Accounting concept selected by service and basic-account status",
+    "TRANSQUICK orders with an SPI payment form use that form for accounting lookup and commission",
+    "Debit note is routed by account type: virtual accounts via automatic virtual NDC, current/savings via standard NDC",
+    "Accounting-account debits for company 1295 on SPI are booked as balance instead of value"
+   ]
+  },
+  {
+   "name": "CommissionComputation (working set)",
+   "source": "legacy/debcred/sp_debcred_empresa.sp:126",
+   "fields": [
+    {
+     "name": "@w_val_por_tran",
+     "type": "money",
+     "note": "per-transaction fee from db_biz_admempresa..sp_con_comision @o_valor_por_tran (:222); 0 on failure (:226)"
+    },
+    {
+     "name": "@w_comision_und",
+     "type": "money",
+     "note": "unit commission; ends equal to @w_val_por_tran (:248)"
+    },
+    {
+     "name": "@w_cantidad",
+     "type": "int",
+     "note": "billable transaction count = @w_comision_und / @w_val_por_tran (:244); passed as @i_nchq (:726)"
+    },
+    {
+     "name": "@w_valor_comision",
+     "type": "money",
+     "note": "notification cost base; = @i_valor_comision for TRANSWIFT (:862), @i_comision for TRANSCLI/TARJCRED/COMEXT (:884), + @i_valor2_swift (:980)"
+    }
+   ],
+   "consumedBy": [
+    "Number of billable transactions is derived from commission amount divided by configured per-transaction fee",
+    "Combined commission is normalized into a separate commission when no separate value is supplied",
+    "Notification cost equals separate commission plus the second SWIFT value",
+    "Stray result set and debit-value override for TRANSCLI/TARJCRED/COMEXT"
+   ]
+  },
+  {
+   "name": "DebitReference (working)",
+   "source": "legacy/debcred/sp_debcred_empresa.sp:114",
+   "fields": [
+    {
+     "name": "@w_cadena",
+     "type": "varchar(30)",
+     "note": "= convert(@i_orden_empresa) by default (:422,:448,:612); 'COD:'+@i_cod_swift for TRANSWIFT (:438); passed as @i_ref / @i_cadena to NDC and commission SPs"
+    },
+    {
+     "name": "@w_nombre_cuenta",
+     "type": "varchar(64)",
+     "note": "declared, never assigned; passed as @i_nombre_cuenta/@i_nombre_beneficiario (:1452-1454, :1576-1578) - always NULL"
+    }
+   ],
+   "consumedBy": [
+    "Debit reference text depends on the service",
+    "SPI returns are posted under the original order's service and skip header update",
+    "Separate commission is debited as its own movement; failure rolls back the whole debit",
+    "Second SWIFT commission is debited as affectation type 16"
+   ]
+  },
+  {
+   "name": "DebitOutcome (working / output)",
+   "source": "legacy/debcred/sp_debcred_empresa.sp:116",
+   "fields": [
+    {
+     "name": "@w_cod_errord",
+     "type": "int",
+     "note": "error code returned by the NDC / accounting / commission SPs; 122001 for invalid account type (:1316); recorded on movement and header"
+    },
+    {
+     "name": "@w_sts_proc",
+     "type": "char(1)",
+     "note": "'P' processed, 'X' failed (:1332-1340, :1620)"
+    },
+    {
+     "name": "@w_num_error",
+     "type": "int",
+     "note": "procedure-level error: 120000, 122002, 122003, 122004"
+    },
+    {
+     "name": "@w_savepoint",
+     "type": "varchar(32)",
+     "note": "'sp_debito_empresa' (:406); rolled back to on NDC failure (:1338)"
+    },
+    {
+     "name": "@w_tran_ncnd",
+     "type": "int",
+     "note": "monetary transaction sequence from NDC (@o_ssn_monet :662 / @o_transaccion :730); passed as @i_tran_ncnd (:1460)"
+    },
+    {
+     "name": "@w_return",
+     "type": "int",
+     "note": "SP return status"
+    },
+    {
+     "name": "@w_act_totord",
+     "type": "char(1)",
+     "note": "'S' default; 'N' for SPI returns (:1378) suppresses 122004"
+    },
+    {
+     "name": "@wRowdbBiz",
+     "type": "int",
+     "note": "@@rowcount carrier for live-vs-history fallback"
+    },
+    {
+     "name": "@o_error",
+     "type": "int output",
+     "note": "set to @w_cod_errord (:1488,:1698,:1724,:1850) or @w_num_error when @i_aplcobis<>'S' (:2166)"
+    }
+   ],
+   "consumedBy": [
+    "Debit outcome sets process status, rolls back on failure, and the movement is always recorded",
+    "A failed debit note is committed as a recorded failure and returned as an output error code, not as a procedure error",
+    "Separate commission is debited as its own movement; failure rolls back the whole debit",
+    "Second SWIFT commission is debited as affectation type 16",
+    "No header row updated is an error except for exempted services",
+    "Error reporting mode depends on invocation context",
+    "Order data is read from the live payments database first and from the SAT history database when the order has already been archived",
+    "Order header state update falls back to the historical order table and treats a null state as Initial",
+    "SPI returns are posted under the original order's service and skip header update"
+   ]
+  },
+  {
+   "name": "NotificationContext (working)",
+   "source": "legacy/debcred/sp_debcred_empresa.sp:752",
+   "fields": [
+    {
+     "name": "@w_serv_sms",
+     "type": "varchar(10)",
+     "note": "SMS service code parsed from ad_servicios_sms ct_cod_catalogo before '-' (:798)"
+    },
+    {
+     "name": "@w_proddeb",
+     "type": "varchar(3)",
+     "note": "'CTE','AHO','VIR' (basic virtual -> 'AHO', :1148)"
+    },
+    {
+     "name": "@w_prodcre",
+     "type": "varchar(3)",
+     "note": "'CTE','AHO','CON','ESP' or null by @w_tip_cta (:944-974)"
+    },
+    {
+     "name": "@w_tip_cta",
+     "type": "smallint",
+     "note": "beneficiary account type from bp_detalle.dt_tipo_cta"
+    },
+    {
+     "name": "@w_desc_canal",
+     "type": "varchar(16)",
+     "note": "'SAT','24OnLine','Ventanilla' (:770-792)"
+    },
+    {
+     "name": "@w_valor_sms",
+     "type": "varchar(11)",
+     "note": "string of @i_valor_debito (:984)"
+    },
+    {
+     "name": "@w_costo_sms",
+     "type": "varchar(11)",
+     "note": "string of @w_valor_comision (:986)"
+    },
+    {
+     "name": "@w_emp_inst",
+     "type": "varchar(32)",
+     "note": "dt_referencia_grupo (TRANSWIFT) or catalogue name substring (BCE)"
+    },
+    {
+     "name": "@w_canal_sms",
+     "type": "char(3)",
+     "note": "DIR/SAT->'SAT', BNK->'IBK' (:764-784)"
+    },
+    {
+     "name": "@w_cta_cre",
+     "type": "varchar(30)",
+     "note": "credit account"
+    },
+    {
+     "name": "@w_ente",
+     "type": "int",
+     "note": "debtor client id from cc_ctacte/ah_cuenta/vi_cuenta"
+    },
+    {
+     "name": "@w_bloqNoti",
+     "type": "char(1)",
+     "note": "'S' when ba_bloqueaNotificacionSAT matches service-sms and sp_name (:1166-1180)"
+    },
+    {
+     "name": "@w_serv_pago_dir",
+     "type": "varchar(4)",
+     "note": "'B' or 'OTRO' from ad_notificacion_basica (:998-1014)"
+    },
+    {
+     "name": "@w_dt_referencia_grupo",
+     "type": "varchar(20)"
+    },
+    {
+     "name": "@w_nombre_cuenta_d",
+     "type": "varchar(64)",
+     "note": "dt_nombre_beneficiario"
+    },
+    {
+     "name": "@w_msg",
+     "type": "varchar(64)",
+     "note": "@o_msg of pa_sat_pnotificacion"
+    },
+    {
+     "name": "@v_notiBCE",
+     "type": "char(1)",
+     "note": "'S' when canal 'BCE', ROLPAGO and null debit account (:1190); note @w_canal_sms can never be 'BCE' after remapping unless passed literally"
+    }
+   ],
+   "consumedBy": [
+    "Successful debits trigger a customer notification event with channel and product mapping, unless blocked",
+    "Notification channel and SMS service resolved from the order channel and catalogue",
+    "Notification is routed to basic-account notifier or event engine by service classification",
+    "Event notification identifies debtor product and client, treating basic virtual accounts as savings",
+    "Notification is sent only when an active SMS-service mapping exists for the service and channel",
+    "Generic notification is suppressed by the SAT block list or for BCE payroll without a debit account",
+    "Notification cost equals separate commission plus the second SWIFT value",
+    "Interbank services debit the ordered value and map beneficiary account type to credit product"
+   ]
+  },
+  {
+   "name": "bp_total_orden / db_sat_his..bp_total_orden_his (order header)",
+   "source": "legacy/debcred/sp_debcred_empresa.sp:1886",
+   "fields": [
+    {
+     "name": "te_orden_banco",
+     "type": "int (inferred from @i_orden)",
+     "note": "key"
+    },
+    {
+     "name": "te_frm_pagcob",
+     "type": "char(3) (inferred)",
+     "note": "payment form; filtered by @i_frm_pagcob_deb or literal sets CUE/EFE/CHL, CUE/EFE/CHE, COB/TRC/CTB/CPD/TPD"
+    },
+    {
+     "name": "te_servicio",
+     "type": "varchar(10) (inferred)"
+    },
+    {
+     "name": "te_estado_proceso",
+     "type": "char(1) (inferred)",
+     "note": "'I' initial (null treated as 'I'), 'T' in transition"
+    },
+    {
+     "name": "te_codigo_error",
+     "type": "int (inferred from @w_cod_errord)"
+    }
+   ],
+   "consumedBy": [
+    "Order header transitions from Initial to In-Transition by channel, option and payment form",
+    "Order header state update falls back to the historical order table and treats a null state as Initial",
+    "No header row updated is an error except for exempted services",
+    "SPI returns are posted under the original order's service and skip header update"
+   ]
+  },
+  {
+   "name": "bp_orden / db_sat_his..bp_orden_his (order)",
+   "source": "legacy/debcred/sp_debcred_empresa.sp:830",
+   "fields": [
+    {
+     "name": "or_orden_banco",
+     "type": "int (inferred)",
+     "note": "key"
+    },
+    {
+     "name": "or_ordenante",
+     "type": "int (inferred from @i_empresa)"
+    },
+    {
+     "name": "or_servicio",
+     "type": "varchar(10) (inferred)",
+     "note": "original service for SPI returns (:1352-1374)"
+    },
+    {
+     "name": "or_fch_inicio_pagcob",
+     "type": "datetime (inferred)",
+     "note": "only in commented-out ROLPAGO block (:2098-2124)"
+    }
+   ],
+   "consumedBy": [
+    "SPI returns are posted under the original order's service and skip header update",
+    "Order data is read from the live payments database first and from the SAT history database when the order has already been archived",
+    "Successful debits trigger a customer notification event with channel and product mapping, unless blocked"
+   ]
+  },
+  {
+   "name": "bp_detalle / db_sat_his..bp_detalle_his (order detail)",
+   "source": "legacy/debcred/sp_debcred_empresa.sp:830",
+   "fields": [
+    {
+     "name": "dt_orden_banco",
+     "type": "int (inferred)"
+    },
+    {
+     "name": "dt_secuencial",
+     "type": "int (inferred from @i_secuencial)"
+    },
+    {
+     "name": "dt_referencia_grupo",
+     "type": "varchar(20) (inferred from @w_dt_referencia_grupo)",
+     "note": "institution / transfer direction; joined to ad_cuentas_bce catalogue first 9 chars (:902)"
+    },
+    {
+     "name": "dt_nom_cuenta",
+     "type": "varchar (>=30, inferred)",
+     "note": "truncated to 30 (:828)"
+    },
+    {
+     "name": "dt_tipo_cta",
+     "type": "smallint (inferred)",
+     "note": "beneficiary account type 0/3/4/8/9"
+    },
+    {
+     "name": "dt_numero_cuenta",
+     "type": "varchar(30) (inferred from @w_cta_cre)"
+    },
+    {
+     "name": "dt_nombre_beneficiario",
+     "type": "varchar(64) (inferred)"
+    }
+   ],
+   "consumedBy": [
+    "Interbank services debit the ordered value and map beneficiary account type to credit product",
+    "Notification is routed to basic-account notifier or event engine by service classification",
+    "Order data is read from the live payments database first and from the SAT history database when the order has already been archived",
+    "Successful debits trigger a customer notification event with channel and product mapping, unless blocked"
+   ]
+  },
+  {
+   "name": "db_biz_admempresa..ba_tabla / ba_catalogo (parameter catalogue)",
+   "source": "legacy/debcred/sp_debcred_empresa.sp:484",
+   "fields": [
+    {
+     "name": "tb_cod_tabla",
+     "type": "int (inferred)",
+     "note": "join key to ct_cod_tabla"
+    },
+    {
+     "name": "tb_nom_tabla",
+     "type": "varchar (inferred)",
+     "note": "catalogue names used: ad_concepto_contable (:492), ad_servicios_sms (:804), ad_cuentas_bce (:904), ad_notificacion_basica (:1002), ba_bloqueaNotificacionSAT (:1174); ad_concepto_spi only in commented block (:574)"
+    },
+    {
+     "name": "tb_est_tabla",
+     "type": "char(1) (inferred)",
+     "note": "'A'"
+    },
+    {
+     "name": "ct_cod_tabla",
+     "type": "int (inferred)"
+    },
+    {
+     "name": "ct_cod_catalogo",
+     "type": "varchar (inferred)",
+     "note": "concept code / 'SERV-CANAL' composite for SMS / service code for notification type"
+    },
+    {
+     "name": "ct_nom_catalogo",
+     "type": "varchar (inferred)",
+     "note": "SMS: LIKE service; BCE: 9-char ref + institution name from pos 10; block list: 'servicio-sms'"
+    },
+    {
+     "name": "ct_otro_campo_catalogo",
+     "type": "varchar (inferred)",
+     "note": "'NDCORPEI' marker; notifier type 'B'; block-list sp_name"
+    },
+    {
+     "name": "ct_est_catalogo",
+     "type": "char(1) (inferred)",
+     "note": "'A'"
+    }
+   ],
+   "consumedBy": [
+    "IMPADUAN debits for CORPEI use the NDCORPEI accounting concept with fallback causal 512",
+    "Notification channel and SMS service resolved from the order channel and catalogue",
+    "Notification is sent only when an active SMS-service mapping exists for the service and channel",
+    "Notification is routed to basic-account notifier or event engine by service classification",
+    "Generic notification is suppressed by the SAT block list or for BCE payroll without a debit account",
+    "Interbank services debit the ordered value and map beneficiary account type to credit product"
+   ]
+  },
+  {
+   "name": "Account masters: cob_cuentas..cc_ctacte, cob_ahorros..ah_cuenta, cob_virtuales..vi_cuenta",
+   "source": "legacy/debcred/sp_debcred_empresa.sp:300",
+   "fields": [
+    {
+     "name": "cc_cta_banco / ah_cta_banco / vi_cta_banco",
+     "type": "char(10) (inferred from @i_numcta_emp)",
+     "note": "account number key"
+    },
+    {
+     "name": "cc_cliente / ah_cliente / vi_cliente",
+     "type": "int (inferred from @w_ente)",
+     "note": "debtor client id (:1110, :1128, :1146)"
+    },
+    {
+     "name": "vi_prod_banc",
+     "type": "smallint (inferred)",
+     "note": "13 = basic account (:304, :1148)"
+    }
+   ],
+   "consumedBy": [
+    "Accounting concept selected by service and basic-account status",
+    "Event notification identifies debtor product and client, treating basic virtual accounts as savings"
+   ]
+  },
+  {
+   "name": "DebitNotePayload (sp_ndc_ahcc / cob_virtuales..sp_vi_ndc_automatica interface)",
+   "source": "legacy/debcred/sp_debcred_empresa.sp:628",
+   "fields": [
+    {
+     "name": "@t_trn",
+     "type": "int",
+     "note": "@w_trn"
+    },
+    {
+     "name": "@i_cta / @i_cuenta",
+     "type": "char(10)",
+     "note": "@i_numcta_emp"
+    },
+    {
+     "name": "@i_tipo_cuenta",
+     "type": "smallint",
+     "note": "sp_ndc_ahcc only"
+    },
+    {
+     "name": "@i_val / @i_valor",
+     "type": "money",
+     "note": "@i_valor_debito"
+    },
+    {
+     "name": "@i_cau / @i_causal",
+     "type": "char(4)"
+    },
+    {
+     "name": "@i_mon",
+     "type": "smallint"
+    },
+    {
+     "name": "@i_ref",
+     "type": "varchar(30)",
+     "note": "@w_cadena"
+    },
+    {
+     "name": "@i_canal",
+     "type": "char(3)",
+     "note": "literal 'SAT' for virtual (:650); @i_canal for ahcc"
+    },
+    {
+     "name": "@i_verf_estado_cta",
+     "type": "char(1)",
+     "note": "'S' virtual only"
+    },
+    {
+     "name": "@i_batch",
+     "type": "bit",
+     "note": "virtual only"
+    },
+    {
+     "name": "@i_alt",
+     "type": "int",
+     "note": "@i_orden"
+    },
+    {
+     "name": "@i_alterno_dos",
+     "type": "char(3)",
+     "note": "@i_frm_pagcob (ahcc)"
+    },
+    {
+     "name": "@i_frm_pagcob",
+     "type": "char(3)",
+     "note": "@i_frm_pagcob_spi (ahcc :716)"
+    },
+    {
+     "name": "@i_tcomision",
+     "type": "money",
+     "note": "@i_comision (ahcc)"
+    },
+    {
+     "name": "@i_nchq",
+     "type": "int",
+     "note": "@w_cantidad (ahcc :726)"
+    },
+    {
+     "name": "@i_solca",
+     "type": "money",
+     "note": "@w_comision_und (ahcc :728)"
+    },
+    {
+     "name": "@i_tarjeta / @i_servicio / @i_detalle / @i_orden_banco / @i_secuencial",
+     "type": "varchar(24)/varchar(10)/varchar(24)/int/int",
+     "note": "ahcc only"
+    },
+    {
+     "name": "@o_error / @o_ssn_monet / @o_transaccion",
+     "type": "int output",
+     "note": "error and monetary transaction sequence"
+    }
+   ],
+   "consumedBy": [
+    "Debit note is routed by account type: virtual accounts via automatic virtual NDC, current/savings via standard NDC",
+    "Number of billable transactions is derived from commission amount divided by configured per-transaction fee",
+    "Debit reference text depends on the service",
+    "Debit outcome sets process status, rolls back on failure, and the movement is always recorded"
+   ]
+  },
+  {
+   "name": "AccountingAccountDebitPayload (db_biz_pagos..sp_graba_tran_servicio interface)",
+   "source": "legacy/debcred/sp_debcred_empresa.sp:1270",
+   "fields": [
+    {
+     "name": "@v_saldo_ap",
+     "type": "money",
+     "note": "= original debit value only when empresa '1295' and SPI (:1278); otherwise NULL"
+    },
+    {
+     "name": "@v_valor_debito",
+     "type": "money",
+     "note": "copy of @i_valor_debito (:1272)"
+    },
+    {
+     "name": "@w_empresa_str",
+     "type": "varchar(10)",
+     "note": "convert(@i_empresa); passed as @i_tipo_chequera (:1296)"
+    },
+    {
+     "name": "@i_indicador",
+     "type": "int",
+     "note": "literal 1"
+    },
+    {
+     "name": "@i_saldo / @i_valor",
+     "type": "money",
+     "note": "@v_saldo_ap / @i_valor_debito (0 for 1295 SPI)"
+    },
+    {
+     "name": "@i_referencia",
+     "type": "varchar(24)",
+     "note": "@i_ref_prov"
+    },
+    {
+     "name": "@i_orden_banco / @i_secuencial",
+     "type": "int",
+     "note": "@i_orden / 0"
+    }
+   ],
+   "consumedBy": [
+    "Accounting-account debits for company 1295 on SPI are booked as balance instead of value",
+    "Only current, savings, virtual and accounting account types may be debited"
+   ]
+  },
+  {
+   "name": "MovementRecord (sp_grb_mov_y_frmpgo interface)",
+   "source": "legacy/debcred/sp_debcred_empresa.sp:1394",
+   "fields": [
+    {
+     "name": "@t_trn",
+     "type": "int"
+    },
+    {
+     "name": "@i_tipo_proceso",
+     "type": "char(1)"
+    },
+    {
+     "name": "@i_empresa / @i_producto / @i_orden_banco / @i_orden_empresa",
+     "type": "int/smallint/int/int"
+    },
+    {
+     "name": "@i_canal",
+     "type": "char(3)"
+    },
+    {
+     "name": "@i_cau",
+     "type": "char(4)"
+    },
+    {
+     "name": "@i_est_proceso",
+     "type": "char(1)",
+     "note": "@w_sts_proc 'P'/'X'"
+    },
+    {
+     "name": "@i_cod_error",
+     "type": "int",
+     "note": "@w_cod_errord"
+    },
+    {
+     "name": "@i_frm_pagcob",
+     "type": "char(3)"
+    },
+    {
+     "name": "@i_moneda_orden",
+     "type": "smallint"
+    },
+    {
+     "name": "@i_valor_mov",
+     "type": "money",
+     "note": "@i_valor_debito (:1424) or @i_valor_comision on commission failure (:1658)"
+    },
+    {
+     "name": "@i_tipo_afectacion",
+     "type": "char(1)",
+     "note": "literal '1'"
+    },
+    {
+     "name": "@i_fch_contab",
+     "type": "datetime"
+    },
+    {
+     "name": "@i_referencia",
+     "type": "varchar(100)",
+     "note": "@i_referencia or 'COBRO DE COMISION' (:1664)"
+    },
+    {
+     "name": "@i_secuencial",
+     "type": "int",
+     "note": "literal 0"
+    },
+    {
+     "name": "@i_servicio",
+     "type": "varchar(10)",
+     "note": "may be the original service for SPI returns"
+    },
+    {
+     "name": "@i_tipo_pagcob / @i_pais_cta / @i_cod_banco_cta / @i_tipo_cta / @i_numero_cta",
+     "type": "char(1)/smallint/smallint/smallint/char(10)"
+    },
+    {
+     "name": "@i_valor_ordenado",
+     "type": "money"
+    },
+    {
+     "name": "@i_nem_ordenante",
+     "type": "char(15)"
+    },
+    {
+     "name": "@i_localidad_pagcob",
+     "type": "smallint"
+    },
+    {
+     "name": "@i_nombre_cuenta / @i_nombre_beneficiario",
+     "type": "varchar(64)",
+     "note": "always NULL (@w_nombre_cuenta never set)"
+    },
+    {
+     "name": "@i_valor_comision",
+     "type": "money",
+     "note": "@i_comision (combined), not @i_valor_comision"
+    },
+    {
+     "name": "@i_tran_ncnd",
+     "type": "int",
+     "note": "@w_tran_ncnd"
+    }
+   ],
+   "consumedBy": [
+    "Debit outcome sets process status, rolls back on failure, and the movement is always recorded",
+    "SPI returns are posted under the original order's service and skip header update",
+    "Separate commission is debited as its own movement; failure rolls back the whole debit",
+    "A failed debit note is committed as a recorded failure and returned as an output error code, not as a procedure error"
+   ]
+  },
+  {
+   "name": "CommissionDebitPayload (sp_grb_comision interface)",
+   "source": "legacy/debcred/sp_debcred_empresa.sp:1518",
+   "fields": [
+    {
+     "name": "@i_canal_comision",
+     "type": "char(3)",
+     "note": "@i_canal"
+    },
+    {
+     "name": "@i_valor_comision",
+     "type": "money",
+     "note": "@i_valor_comision (:1548) or @i_valor2_swift (:1776)"
+    },
+    {
+     "name": "@i_cadena",
+     "type": "varchar(30)",
+     "note": "@w_cadena"
+    },
+    {
+     "name": "@i_frm_pagcob",
+     "type": "char(3)",
+     "note": "already swapped to SPI form for TRANSQUICK (:1502)"
+    },
+    {
+     "name": "@i_referencia",
+     "type": "varchar",
+     "note": "literal 'COBRO DE COMISION' (:1562) or @i_referencia for SWIFT (:1790)"
+    },
+    {
+     "name": "@i_detalle_ref",
+     "type": "varchar(24)",
+     "note": "@i_ref_prov"
+    },
+    {
+     "name": "@i_tipo_horario",
+     "type": "char(1)",
+     "note": "@i_tipo_referencia"
+    },
+    {
+     "name": "@i_tipoafec",
+     "type": "char(2)",
+     "note": "'16' for second SWIFT commission only (:1812)"
+    },
+    {
+     "name": "@i_savepoint",
+     "type": "varchar(32)",
+     "note": "@w_savepoint"
+    },
+    {
+     "name": "@i_secuencial",
+     "type": "int",
+     "note": "0"
+    },
+    {
+     "name": "@i_valor_tarifa",
+     "type": "money",
+     "note": "@i_valor_tarifa (=@i_valor_comision for TRANSBIMO) or @i_valor2_swift"
+    },
+    {
+     "name": "@i_valor_comision_cue / @i_valor_tarifa_efe / @i_valor_comision_efe / @i_valor_tarifa_che / @i_valor_comision_che",
+     "type": "money",
+     "note": "REF33 pass-through; first call only"
+    },
+    {
+     "name": "@o_error",
+     "type": "int output",
+     "note": "-> @w_cod_errord"
+    }
+   ],
+   "consumedBy": [
+    "Separate commission is debited as its own movement; failure rolls back the whole debit",
+    "Second SWIFT commission is debited as affectation type 16",
+    "TRANSBIMO tariff equals its separate commission",
+    "TRANSQUICK orders with an SPI payment form use that form for accounting lookup and commission",
+    "Debit payment form defaults to the order payment form, and TRANSQUICK commissions use the SPI payment form when supplied"
+   ]
+  },
+  {
+   "name": "EventNotificationPayload (cob_internet..sp_eventos interface)",
+   "source": "legacy/debcred/sp_debcred_empresa.sp:1210",
+   "fields": [
+    {
+     "name": "@i_operacion",
+     "type": "char(1)",
+     "note": "literal 'I'"
+    },
+    {
+     "name": "@i_canal",
+     "type": "char(3)",
+     "note": "@w_canal_sms"
+    },
+    {
+     "name": "@i_servicio",
+     "type": "varchar(10)",
+     "note": "@w_serv_sms"
+    },
+    {
+     "name": "@i_producto",
+     "type": "smallint",
+     "note": "@i_tipcta_emp"
+    },
+    {
+     "name": "@i_cuenta / @i_cta_deb",
+     "type": "char(10)",
+     "note": "@i_numcta_emp"
+    },
+    {
+     "name": "@i_valor",
+     "type": "varchar(11)",
+     "note": "@w_valor_sms"
+    },
+    {
+     "name": "@i_prod_deb / @i_prod_cre",
+     "type": "varchar(3)"
+    },
+    {
+     "name": "@i_cta_cre",
+     "type": "varchar(30)"
+    },
+    {
+     "name": "@i_cliente",
+     "type": "int",
+     "note": "@w_ente"
+    },
+    {
+     "name": "@i_costo",
+     "type": "varchar(11)",
+     "note": "@w_costo_sms"
+    },
+    {
+     "name": "@i_empresa",
+     "type": "varchar(32)",
+     "note": "@w_emp_inst"
+    },
+    {
+     "name": "@i_desc_canal",
+     "type": "varchar(16)"
+    }
+   ],
+   "consumedBy": [
+    "Successful debits trigger a customer notification event with channel and product mapping, unless blocked",
+    "Event notification identifies debtor product and client, treating basic virtual accounts as savings",
+    "Generic notification is suppressed by the SAT block list or for BCE payroll without a debit account",
+    "Notification cost equals separate commission plus the second SWIFT value"
+   ]
+  },
+  {
+   "name": "BasicAccountNotificationPayload (pa_sat_pnotificacion interface)",
+   "source": "legacy/debcred/sp_debcred_empresa.sp:1052",
+   "fields": [
+    {
+     "name": "@i_canal",
+     "type": "char(3)",
+     "note": "raw @i_canal, not remapped"
+    },
+    {
+     "name": "@i_ctadebito / @i_tipctadeb",
+     "type": "char(10) / smallint"
+    },
+    {
+     "name": "@i_servicio",
+     "type": "varchar(10)"
+    },
+    {
+     "name": "@i_orden_banco / @i_secuencial",
+     "type": "int"
+    },
+    {
+     "name": "@i_direccion_transf",
+     "type": "varchar(20)",
+     "note": "@w_dt_referencia_grupo"
+    },
+    {
+     "name": "@i_valor",
+     "type": "money",
+     "note": "@i_valor_ordenado"
+    },
+    {
+     "name": "@i_nombrecred",
+     "type": "varchar(64)",
+     "note": "dt_nombre_beneficiario"
+    },
+    {
+     "name": "@i_comision",
+     "type": "money",
+     "note": "@i_valor_comision"
+    },
+    {
+     "name": "@i_ctacred / @i_prod_cre / @i_empresa",
+     "type": "varchar(30)/varchar(3)/varchar(32)"
+    },
+    {
+     "name": "@o_error",
+     "type": "int output",
+     "note": "written directly to @o_error (:1080) - overwrites procedure output"
+    },
+    {
+     "name": "@o_msg",
+     "type": "varchar(64) output"
+    }
+   ],
+   "consumedBy": [
+    "Notification is routed to basic-account notifier or event engine by service classification",
+    "Successful debits trigger a customer notification event with channel and product mapping, unless blocked"
+   ]
+  },
+  {
+   "name": "CommissionFeeLookup (db_biz_admempresa..sp_con_comision interface)",
+   "source": "legacy/debcred/sp_debcred_empresa.sp:204",
+   "fields": [
+    {
+     "name": "@i_cod_empresa / @i_cod_producto / @i_cod_servicio / @i_cod_canal",
+     "type": "int/smallint/varchar(10)/char(3)"
+    },
+    {
+     "name": "@i_cod_alcance",
+     "type": "char(1)",
+     "note": "literal 'E'"
+    },
+    {
+     "name": "@i_tip_comision",
+     "type": "char(2)",
+     "note": "literal '01'"
+    },
+    {
+     "name": "@i_secuencia",
+     "type": "int",
+     "note": "literal 1"
+    },
+    {
+     "name": "@i_aplcobis",
+     "type": "char(1)"
+    },
+    {
+     "name": "@o_valor_por_tran",
+     "type": "money output"
+    }
+   ],
+   "consumedBy": [
+    "Number of billable transactions is derived from commission amount divided by configured per-transaction fee"
+   ]
+  },
+  {
+   "name": "AccountingConfigLookup (db_biz_admempresa..sp_con_confcontable interface)",
+   "source": "legacy/debcred/sp_debcred_empresa.sp:322",
+   "fields": [
+    {
+     "name": "@i_producto / @i_servicio / @i_tipoafec / @i_canal / @i_tipcta / @i_moneda / @i_referencia / @i_empresa",
+     "type": "smallint/varchar(10)/char(2)/char(3)/smallint/char(2)/char(1)/int"
+    },
+    {
+     "name": "@i_frm_pagcob",
+     "type": "char(3)",
+     "note": "@i_frm_pagcob_spi for TRANSQUICK (:330), else @i_frm_pagcob"
+    },
+    {
+     "name": "@i_concepto",
+     "type": "varchar",
+     "note": "@w_concepto_bas (:370) or @w_concepto NDCORPEI (:520); omitted on the TRANSQUICK-SPI call"
+    },
+    {
+     "name": "@o_trn / @o_cau",
+     "type": "int output / char(4) output"
+    }
+   ],
+   "consumedBy": [
+    "Accounting transaction code and causal are resolved from the accounting configuration; missing configuration aborts the debit",
+    "IMPADUAN debits for CORPEI use the NDCORPEI accounting concept with fallback causal 512",
+    "Accounting concept selected by service and basic-account status",
+    "TRANSQUICK orders with an SPI payment form use that form for accounting lookup and commission"
+   ]
+  }
+ ],
+ "injectionFlags": [],
+ "stats": {
+  "confirmed": 32,
+  "rejected": 0,
+  "unverified": 0,
+  "p0": 6,
+  "needsSme": 9,
+  "agents": 82,
+  "consolidated": 30,
+  "modules": 0,
+  "batches": 0,
+  "skippedModules": [],
+  "failedModules": [],
+  "droppedModules": [],
+  "skippedPhases": []
+ }
+}

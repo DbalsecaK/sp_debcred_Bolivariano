@@ -1,0 +1,42 @@
+%% debcred data lineage: blocks to tables. Solid = read, thick = write. No DDL in the tree.
+%% Money tables are written inside the external procedures and are not visible here.
+graph LR
+  subgraph BLOCKS["sp_debcred_empresa blocks"]
+    B2[B2 Concept]
+    B5[B5 Reference / causal]
+    B7[B7 Notifications]
+    B9[B9 Outcome + movement]
+    B12[B12 Order-state update]
+  end
+  subgraph ADM["db_biz_admempresa"]
+    T_cat[(ba_tabla / ba_catalogo)]
+  end
+  subgraph PAG["db_biz_pagos (live orders)"]
+    T_ord[(bp_orden)]
+    T_det[(bp_detalle)]
+    T_tot[(bp_total_orden)]
+  end
+  subgraph HIS["db_sat_his (archived orders)"]
+    T_ordh[(bp_orden_his)]
+    T_deth[(bp_detalle_his)]
+    T_toth[(bp_total_orden_his)]
+  end
+  subgraph ACC["Account masters"]
+    T_cc[(cob_cuentas..cc_ctacte)]
+    T_ah[(cob_ahorros..ah_cuenta)]
+    T_vi[(cob_virtuales..vi_cuenta)]
+  end
+  B2 -- read :300 --> T_vi
+  B5 -- read :486 --> T_cat
+  B7 -- read :800 --> T_cat
+  B7 -- read :830 --> T_ord
+  B7 -- read :850 --> T_ordh
+  B7 -- read :898 --> T_det
+  B7 -- read :924 --> T_deth
+  B7 -- read :1112 --> T_cc
+  B7 -- read :1130 --> T_ah
+  B7 -- read :1150 --> T_vi
+  B9 -- read :1354 --> T_ord
+  B9 -- read :1366 --> T_ordh
+  B12 == write :1886 ==> T_tot
+  B12 == write :1908 fallback ==> T_toth

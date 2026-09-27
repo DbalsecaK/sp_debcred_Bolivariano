@@ -1,0 +1,85 @@
+{
+  "_comment": "Phase 1 golden cases for sp_debcred_empresa. Expected values are the LEGACY behavior read from legacy/debcred/sp_debcred_empresa.sp (spec-based; no ASE available, brief section 7 A4). When the bank records outputs (A6) add cases here with 'recordedFrom'. Inputs not listed take the Requests.currentAccount() fixture (account 0000012345, company 500, order 123456, debit 100.00). 'exit' is A (debit failed, partial commit), C (lbl_error, full rollback) or OK.",
+  "cases": [
+    {
+      "name": "type 3 ROLPAGO happy path (first slice)",
+      "rules": ["RULE-009", "RULE-012"],
+      "accountType": 3, "service": "ROLPAGO", "aplcobis": "N", "company": 500,
+      "accountingReturnCode": 0, "debitReturnCode": 0, "movementReturnCode": 0,
+      "expected": { "returnCode": 0, "oError": 0, "exit": "OK", "begins": 1, "commits": 1, "rollbacks": 0,
+                    "movementStatus": "P", "committed": ["sp_ndc_ahcc", "sp_grb_mov_y_frmpgo"], "cerror": false }
+    },
+    {
+      "name": "type 3 debit note fails 201045 (exit A)",
+      "rules": ["RULE-012", "RULE-015"],
+      "accountType": 3, "service": "ROLPAGO", "aplcobis": "N", "company": 500,
+      "accountingReturnCode": 0, "debitReturnCode": 201045, "movementReturnCode": 0,
+      "expected": { "returnCode": 201045, "oError": 201045, "exit": "A", "begins": 1, "commits": 1, "rollbacks": 0,
+                    "movementStatus": "X", "committed": ["sp_grb_mov_y_frmpgo"], "cerror": false }
+    },
+    {
+      "name": "type 3 debit note fails 201045 from COBIS (exit A, same convention)",
+      "rules": ["RULE-015"],
+      "accountType": 3, "service": "ROLPAGO", "aplcobis": "S", "company": 500,
+      "accountingReturnCode": 0, "debitReturnCode": 201045, "movementReturnCode": 0,
+      "expected": { "returnCode": 201045, "oError": 201045, "exit": "A", "begins": 1, "commits": 1, "rollbacks": 0,
+                    "movementStatus": "X", "committed": ["sp_grb_mov_y_frmpgo"], "cerror": false }
+    },
+    {
+      "name": "missing accounting configuration, not COBIS (exit C before begin tran)",
+      "rules": ["RULE-007", "RULE-028"],
+      "accountType": 3, "service": "ROLPAGO", "aplcobis": "N", "company": 500,
+      "accountingReturnCode": 1, "debitReturnCode": 0, "movementReturnCode": 0,
+      "expected": { "returnCode": 0, "oError": 120000, "exit": "C", "begins": 0, "commits": 0, "rollbacks": 0,
+                    "movementStatus": null, "committed": [], "cerror": false }
+    },
+    {
+      "name": "missing accounting configuration, COBIS (exit C, sp_cerror, code returned, o_error 0)",
+      "rules": ["RULE-007", "RULE-028"],
+      "accountType": 3, "service": "ROLPAGO", "aplcobis": "S", "company": 500,
+      "accountingReturnCode": 1, "debitReturnCode": 0, "movementReturnCode": 0,
+      "expected": { "returnCode": 120000, "oError": 0, "exit": "C", "begins": 0, "commits": 0, "rollbacks": 0,
+                    "movementStatus": null, "committed": [], "cerror": true }
+    },
+    {
+      "name": "unsupported account type 7 (122001, exit A)",
+      "rules": ["RULE-008"],
+      "accountType": 7, "service": "ROLPAGO", "aplcobis": "N", "company": 500,
+      "accountingReturnCode": 0, "debitReturnCode": 0, "movementReturnCode": 0,
+      "expected": { "returnCode": 122001, "oError": 122001, "exit": "A", "begins": 1, "commits": 1, "rollbacks": 0,
+                    "movementStatus": "X", "committed": ["sp_grb_mov_y_frmpgo"], "cerror": false }
+    },
+    {
+      "name": "type 12 virtual happy path",
+      "rules": ["RULE-009", "RULE-026", "RULE-033"],
+      "accountType": 12, "service": "ROLPAGO", "aplcobis": "N", "company": 500,
+      "accountingReturnCode": 0, "debitReturnCode": 0, "movementReturnCode": 0,
+      "expected": { "returnCode": 0, "oError": 0, "exit": "OK", "begins": 1, "commits": 1, "rollbacks": 0,
+                    "movementStatus": "P", "committed": ["sp_vi_ndc_automatica", "sp_grb_mov_y_frmpgo"], "cerror": false }
+    },
+    {
+      "name": "type 9 ledger, company 1295, SPI",
+      "rules": ["RULE-022"],
+      "accountType": 9, "service": "SPI", "aplcobis": "N", "company": 1295,
+      "accountingReturnCode": 0, "debitReturnCode": 0, "movementReturnCode": 0,
+      "expected": { "returnCode": 0, "oError": 0, "exit": "OK", "begins": 1, "commits": 1, "rollbacks": 0,
+                    "movementStatus": "P", "committed": ["sp_graba_tran_servicio", "sp_grb_mov_y_frmpgo"], "cerror": false }
+    },
+    {
+      "name": "movement write fails 5 after a good debit, not COBIS (122002, exit C)",
+      "rules": ["RULE-015", "RULE-028"],
+      "accountType": 3, "service": "ROLPAGO", "aplcobis": "N", "company": 500,
+      "accountingReturnCode": 0, "debitReturnCode": 0, "movementReturnCode": 5,
+      "expected": { "returnCode": 0, "oError": 122002, "exit": "C", "begins": 1, "commits": 0, "rollbacks": 1,
+                    "movementStatus": "P", "committed": [], "cerror": false }
+    },
+    {
+      "name": "movement write fails 5 after a good debit, COBIS (122002, exit C, sp_cerror)",
+      "rules": ["RULE-028"],
+      "accountType": 3, "service": "ROLPAGO", "aplcobis": "S", "company": 500,
+      "accountingReturnCode": 0, "debitReturnCode": 0, "movementReturnCode": 5,
+      "expected": { "returnCode": 122002, "oError": 0, "exit": "C", "begins": 1, "commits": 0, "rollbacks": 1,
+                    "movementStatus": "P", "committed": [], "cerror": true }
+    }
+  ]
+}

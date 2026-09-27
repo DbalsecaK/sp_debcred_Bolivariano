@@ -1,0 +1,56 @@
+%% debcred call graph, block level. Entry point highlighted. External procedures are not in the tree.
+graph TD
+  classDef entry fill:#cc785c,stroke:#333,color:#fff
+  classDef ext fill:#444,stroke:#999,color:#ddd,stroke-dasharray: 4 2
+  subgraph PRE["Pre-transaction"]
+    B0[B0 Signature 47 params]:::entry
+    B1[B1 Init / commission]
+    B2[B2 Concept]
+    B3[B3 Accounting config]
+  end
+  subgraph TX["begin tran ... commit"]
+    B4[B4 begin tran + savepoint]
+    B5[B5 Reference / causal]
+    B6[B6 Debit note AH/CC/VI]
+    B7[B7 Notifications]
+    B8[B8 Accounting acct type 9]
+    B9[B9 Outcome + movement]
+    B10[B10 Commission]
+    B11[B11 2nd SWIFT commission]
+    B12[B12 Order-state update]
+    B14[B14 commit / return 0]
+  end
+  B15[B15 lbl_error: rollback]
+  P1([sp_con_comision]):::ext
+  P2([sp_con_confcontable]):::ext
+  P3([sp_vi_ndc_automatica]):::ext
+  P4([sp_ndc_ahcc]):::ext
+  P5([sp_graba_tran_servicio]):::ext
+  P6([pa_sat_pnotificacion]):::ext
+  P7([sp_eventos]):::ext
+  P8([sp_grb_mov_y_frmpgo]):::ext
+  P9([sp_grb_comision]):::ext
+  P10([sp_cerror]):::ext
+  B0 --> B1 --> B2 --> B3 --> B4
+  B1 --> P1
+  B3 --> P2
+  B3 -- 120000 --> B15
+  B4 -- tipcta 3,4,12 --> B5 --> B6 --> B7 --> B9
+  B4 -- tipcta 9 --> B8 --> B9
+  B5 --> P2
+  B5 -- 120000 --> B15
+  B6 --> P3
+  B6 --> P4
+  B7 --> P6
+  B7 --> P7
+  B8 --> P5
+  B9 --> P8
+  B9 -- debit failed: commit --> B14
+  B9 -- 122002 --> B15
+  B9 --> B10 --> B11 --> B12 --> B14
+  B10 --> P9
+  B10 -- fail: full rollback, then --> P8
+  B11 --> P9
+  B11 -- 122003 --> B15
+  B12 -- 122004 --> B15
+  B15 --> P10

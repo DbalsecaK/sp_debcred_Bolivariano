@@ -1,0 +1,4 @@
+target/
+.jqwik-database
+*.local.md
+*.local.patch

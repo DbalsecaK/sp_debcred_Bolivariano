@@ -1,0 +1,31 @@
+spring:
+  application:
+    name: sp-debcred-empresa
+  # No default datasource: the ASE connection is built by AseSessionFactory under the "ase" profile
+  # from the properties below, and PostgreSQL (the service's own state, brief 7-A3) is a later phase.
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration
+
+  # Architecture review H4: a misspelled key among the 45 must be a 400, never a silent NULL that the
+  # RULE-037 defaults then turn into a different debit.
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: true
+  mvc:
+    problemdetails:
+      enabled: true
+
+server:
+  error:
+    include-stacktrace: never
+    include-message: never
+
+# Sybase ASE with the COBIS procedures and tables. Values come from the environment; nothing here
+# is a credential. cobis-database: the home of the legacy's unqualified names (brief 7-A8).
+debcred:
+  ase:
+    url: ${DEBCRED_ASE_URL:}
+    username: ${DEBCRED_ASE_USERNAME:}
+    password: ${DEBCRED_ASE_PASSWORD:}
+    cobis-database: ${DEBCRED_ASE_COBIS_DATABASE:cobis}

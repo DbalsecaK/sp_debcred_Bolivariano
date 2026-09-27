@@ -1,0 +1,78 @@
+{
+  "system": "debcred",
+  "version": 2,
+  "reviews": {
+    "RULE-001": {
+      "verdict": "confirmed",
+      "at": "2026-09-27T21:23:11+00:00",
+      "title": "TRANSBIMO tariff equals its separate commission",
+      "note": "Confirmed as-is by David Balseca (2026-09-27): technology migration Sybase -> Java microservice with business logic unchanged (INTENT.md). The suspected defect / SME question is recorded as behavior to preserve, not to fix."
+    },
+    "RULE-002": {
+      "verdict": "confirmed",
+      "at": "2026-09-27T21:23:11+00:00",
+      "title": "Unit commission and transaction count derived from company per-transaction tariff",
+      "note": "Confirmed as-is by David Balseca (2026-09-27): technology migration Sybase -> Java microservice with business logic unchanged (INTENT.md). The suspected defect / SME question is recorded as behavior to preserve, not to fix. [The reviewed card 'Number of billable transactions...' was folded into RULE-002 'Unit commission and transaction count derived from company per-transaction tariff' (same source 204-248).]"
+    },
+    "RULE-003": {
+      "verdict": "confirmed",
+      "at": "2026-09-27T21:23:11+00:00",
+      "title": "For TRANSCLI, TARJCRED and COMEXT the recorded debit value is replaced by the ordered value",
+      "note": "Confirmed as-is by David Balseca (2026-09-27): technology migration Sybase -> Java microservice with business logic unchanged (INTENT.md). The suspected defect / SME question is recorded as behavior to preserve, not to fix."
+    },
+    "RULE-004": {
+      "verdict": "confirmed",
+      "at": "2026-09-27T21:23:11+00:00",
+      "title": "Interbank services debit the ordered value and map beneficiary account type to credit product",
+      "note": "Confirmed as-is by David Balseca (2026-09-27): technology migration Sybase -> Java microservice with business logic unchanged (INTENT.md). The suspected defect / SME question is recorded as behavior to preserve, not to fix."
+    },
+    "RULE-008": {
+      "verdict": "confirmed",
+      "at": "2026-09-27T22:34:15+00:00",
+      "title": "Only current, savings, virtual or accounting company accounts may be debited",
+      "note": "Confirmed as-is by David Balseca (2026-09-27): parity; the 122001 error text stays as it is even though it omits account type 12. Duplicates RULE-009's allowed-type list."
+    },
+    "RULE-012": {
+      "verdict": "confirmed",
+      "at": "2026-09-27T21:23:11+00:00",
+      "title": "Debit outcome sets process status, rolls back on failure, and the movement is always recorded",
+      "note": "Confirmed as-is by David Balseca (2026-09-27): technology migration Sybase -> Java microservice with business logic unchanged (INTENT.md). The suspected defect / SME question is recorded as behavior to preserve, not to fix."
+    },
+    "RULE-013": {
+      "verdict": "confirmed",
+      "at": "2026-09-27T21:23:11+00:00",
+      "title": "Separate commission is debited as its own movement; failure rolls back the whole debit",
+      "note": "Confirmed as-is by David Balseca (2026-09-27): technology migration Sybase -> Java microservice with business logic unchanged (INTENT.md). The suspected defect / SME question is recorded as behavior to preserve, not to fix."
+    },
+    "RULE-021": {
+      "verdict": "confirmed",
+      "at": "2026-09-27T21:23:11+00:00",
+      "title": "Generic notification is suppressed by the SAT block list or for BCE payroll without a debit account",
+      "note": "Confirmed as-is by David Balseca (2026-09-27): technology migration Sybase -> Java microservice with business logic unchanged (INTENT.md). The suspected defect / SME question is recorded as behavior to preserve, not to fix. [Renumbered from RULE-019 after extract-rules round 3 on 2026-09-27.]"
+    },
+    "RULE-022": {
+      "verdict": "confirmed",
+      "at": "2026-09-27T21:23:11+00:00",
+      "title": "Accounting-account debits for company 1295 on SPI are booked as balance instead of value",
+      "note": "Confirmed as-is by David Balseca (2026-09-27): technology migration Sybase -> Java microservice with business logic unchanged (INTENT.md). The suspected defect / SME question is recorded as behavior to preserve, not to fix. [Renumbered from RULE-020 after extract-rules round 3 on 2026-09-27.]"
+    },
+    "RULE-025": {
+      "verdict": "confirmed",
+      "at": "2026-09-27T21:23:11+00:00",
+      "title": "Debit payment form defaults to the order payment form, and TRANSQUICK commissions use the SPI payment form when supplied",
+      "note": "Confirmed as-is by David Balseca (2026-09-27): technology migration Sybase -> Java microservice with business logic unchanged (INTENT.md). The suspected defect / SME question is recorded as behavior to preserve, not to fix. [Renumbered from RULE-023 after extract-rules round 3 on 2026-09-27.]"
+    },
+    "RULE-029": {
+      "verdict": "confirmed",
+      "at": "2026-09-27T21:23:11+00:00",
+      "title": "Accounting concept selected by service and basic-account status",
+      "note": "Confirmed as-is by David Balseca (2026-09-27): technology migration Sybase -> Java microservice with business logic unchanged (INTENT.md). The suspected defect / SME question is recorded as behavior to preserve, not to fix. [Renumbered from RULE-026 after extract-rules round 3 on 2026-09-27.]"
+    },
+    "RULE-034": {
+      "verdict": "confirmed",
+      "at": "2026-09-27T21:23:11+00:00",
+      "title": "Successful debits trigger a customer notification event with channel and product mapping, unless blocked",
+      "note": "Confirmed as-is by David Balseca (2026-09-27): technology migration Sybase -> Java microservice with business logic unchanged (INTENT.md). The suspected defect / SME question is recorded as behavior to preserve, not to fix. [Renumbered from RULE-029 after extract-rules round 3 on 2026-09-27.]"
+    }
+  }
+}

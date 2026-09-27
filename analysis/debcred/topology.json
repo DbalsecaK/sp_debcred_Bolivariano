@@ -1,0 +1,855 @@
+{
+  "system": "debcred: dbo.sp_debcred_empresa",
+  "root": {
+    "id": "sys",
+    "name": "debcred",
+    "kind": "system",
+    "children": [
+      {
+        "id": "dom:pre",
+        "name": "Pre-transaction",
+        "kind": "domain",
+        "children": [
+          {
+            "id": "B0",
+            "name": "B0 Signature and declarations",
+            "kind": "module",
+            "language": "tsql-sybase",
+            "loc": 79,
+            "file": "sp_debcred_empresa.sp",
+            "lines": "1-164",
+            "description": "Node B0 is the signature and declarations of dbo.sp_debcred_empresa, the pre-transaction entry point: it receives the payment-order context (@i_orden, @i_orden_empresa, @i_empresa, @i_servicio, @i_frm_pagcob, @i_canal default 'DIR', @i_tipo_afec default '10'), the company account (@i_tipcta_emp, @i_numcta_emp, @i_mon_debito), and amounts (@i_valor_ordenado, @i_valor_debito, @i_comision, @i_valor_comision plus REF33 tariff/commission variants), returning @o_error and @o_reg_a_proc; it declares working variables (@w_savepoint, @w_trn, @w_causal, @w_batch) and reads or writes nothing itself, calling only B1 Init and commission normalization."
+          },
+          {
+            "id": "B1",
+            "name": "B1 Init and commission normalization",
+            "kind": "module",
+            "language": "tsql-sybase",
+            "loc": 36,
+            "file": "sp_debcred_empresa.sp",
+            "lines": "168-272",
+            "description": "Node B1 (Init and commission normalization, sp_debcred_empresa lines 168-272) prepares the pre-transaction state for a company debit: it zeroes @w_cantidad and @w_comision_und, sets @w_batch from @i_aplcobis ('S' gives 0, 'N' gives 1), moves a nonzero @i_comision into @i_valor_comision when the latter is 0, and derives the commission quantity by dividing the unit commission by the per-transaction value, then initializes @w_moneda, @o_error, @w_act_totord, @s_ssn, @w_trn and @w_causal. It calls db_biz_admempresa..sp_con_comision (line 204) with alcance 'E' and tip_comision '01', is called from B0 Signature and declarations, and continues to B2 Concept resolution."
+          },
+          {
+            "id": "B2",
+            "name": "B2 Concept resolution",
+            "kind": "module",
+            "language": "tsql-sybase",
+            "loc": 16,
+            "file": "sp_debcred_empresa.sp",
+            "lines": "276-314",
+            "description": "Node B2 (Concept resolution, Pre-transaction domain, sp_debcred_empresa.sp lines 276-314) determines the base accounting concept code (@w_concepto_bas) for the company debit: when @i_servicio is 'SPI' it takes the value from @s_term and blanks @s_term; otherwise it defaults to '0' and, if @i_tipcta_emp is 12 and the account @i_numcta_emp exists in cob_virtuales..vi_cuenta with vi_prod_banc 13 (a basic account), sets it to '91'. It reads cob_virtuales..vi_cuenta (line 300), is called from B1 Init and commission normalization, and calls B3 Accounting configuration."
+          },
+          {
+            "id": "B3",
+            "name": "B3 Accounting configuration",
+            "kind": "module",
+            "language": "tsql-sybase",
+            "loc": 32,
+            "file": "sp_debcred_empresa.sp",
+            "lines": "318-396",
+            "description": "Node B3 (Accounting configuration, Pre-transaction domain, sp_debcred_empresa.sp lines 318-396) resolves the accounting transaction and cause for the company debit: if @i_servicio is 'TRANSQUICK' and @i_frm_pagcob_spi is set, it uses the SPI payment form, otherwise the regular @i_frm_pagcob with @w_concepto_bas. Both branches call db_biz_admempresa..sp_con_confcontable, returning @w_trn and @w_causal. If @w_return > 0 or @@error <> 0, it sets @w_num_error = 120000 and jumps to lbl_error (B15). It is called from B2 and proceeds to B4."
+          }
+        ]
+      },
+      {
+        "id": "dom:tx",
+        "name": "Inside the transaction",
+        "kind": "domain",
+        "children": [
+          {
+            "id": "B4",
+            "name": "B4 begin tran + savepoint",
+            "kind": "module",
+            "language": "tsql-sybase",
+            "loc": 3,
+            "file": "sp_debcred_empresa.sp",
+            "lines": "402-408",
+            "description": "Node B4 (\"B4 begin tran + savepoint\", domain \"Inside the transaction\") is the point in dbo.sp_debcred_empresa where the company-account debit becomes atomic: at legacy/debcred/sp_debcred_empresa.sp lines 402-408 it issues `begin tran`, sets @w_savepoint to 'sp_debito_empresa', and executes `save tran @w_savepoint` so later steps can roll back to that marker without undoing prior work. It is called from B3 Accounting configuration and calls B5 Reference string and special causal and B8 Accounting account (type 9). The packet shows no reads or writes of tables; the three-line excerpt supports only this."
+          },
+          {
+            "id": "B5",
+            "name": "B5 Reference string and special causal",
+            "kind": "module",
+            "language": "tsql-sybase",
+            "loc": 71,
+            "file": "sp_debcred_empresa.sp",
+            "lines": "414-616",
+            "description": "Node B5 (sp_debcred_empresa.sp lines 414-616) builds the reference string @w_cadena for company account types 3, 4 or 12, normally from @i_orden_empresa; for service 'TRANSWIFT' it uses 'COD:' plus @i_cod_swift, and for 'IMPADUAN' with @i_cod_swift 'CORPEI' it resolves the special causal @w_causal (default '512') and concept @w_concepto (default '99999'), raising error 120000 if no accounting configuration exists. It reads db_biz_admempresa..ba_tabla (line 486) and ba_catalogo, calls sp_con_confcontable (line 500), is called from B4, and proceeds to B6 or B15 lbl_error."
+          },
+          {
+            "id": "B6",
+            "name": "B6 Debit note by account type",
+            "kind": "module",
+            "language": "tsql-sybase",
+            "loc": 54,
+            "file": "sp_debcred_empresa.sp",
+            "lines": "624-740",
+            "description": "Node B6 \"Debit note by account type\" posts the debit note against the company account by branching on the account type: when @i_tipcta_emp = 12 it calls cob_virtuales..sp_vi_ndc_automatica with the account @i_numcta_emp, amount @i_valor_debito, causal @w_causal, currency @i_mon_debito, channel 'SAT', reference @w_cadena and order @i_orden, returning @w_tran_ncnd; otherwise it executes sp_ndc_ahcc with the same account, causal, amount, currency, card, service, commission, payment form and order data. Both paths set @w_cod_errord from @w_return. It is called from B5 and calls B7 Notifications (sp_debcred_empresa.sp lines 624-740)."
+          },
+          {
+            "id": "B7",
+            "name": "B7 Notifications",
+            "kind": "module",
+            "language": "tsql-sybase",
+            "loc": 209,
+            "file": "sp_debcred_empresa.sp",
+            "lines": "746-1256",
+            "description": "Node B7 Notifications (sp_debcred_empresa.sp lines 746-1256) runs inside the transaction after a successful debit (@w_return = 0) for any service other than PAGOPRV: it maps the channel (DIR/SAT to SAT, BNK to IBK \"24OnLine\", VEN to \"Ventanilla\"), looks up the SMS service in ad_servicios_sms, resolves the beneficiary company, credit account and product (CTE, AHO, CON, ESP) for TRANSWIFT, TRANSCLI, TARJCRED or COMEXT, then sends the notification. It reads ba_tabla, bp_orden, bp_orden_his, bp_detalle, bp_detalle_his, cc_ctacte, ah_cuenta and vi_cuenta; calls pa_sat_pnotificacion and sp_eventos; is called from B6 and calls B9."
+          },
+          {
+            "id": "B8",
+            "name": "B8 Accounting account (type 9)",
+            "kind": "module",
+            "language": "tsql-sybase",
+            "loc": 24,
+            "file": "sp_debcred_empresa.sp",
+            "lines": "1260-1322",
+            "description": "Node B8 \"Accounting account (type 9)\" handles the debit when the company account type @i_tipcta_emp is 9 (Contable): it copies @i_valor_debito into @v_valor_debito, and for company '1295' with service 'SPI' moves the amount into @v_saldo_ap and zeroes @i_valor_debito (REF 45 JPI); any other type sets error 122001, since only Corriente (3), Ahorros (4) or Contable (9) are allowed. It calls db_biz_pagos..sp_graba_tran_servicio (line 1284), storing the return in @w_cod_errord; it is called from B4 begin tran + savepoint and flows to B9 Debit outcome and movement record."
+          },
+          {
+            "id": "B9",
+            "name": "B9 Debit outcome and movement record",
+            "kind": "module",
+            "language": "tsql-sybase",
+            "loc": 66,
+            "file": "sp_debcred_empresa.sp",
+            "lines": "1332-1492",
+            "description": "Node B9 records the company-account debit outcome inside the transaction: it sets process status 'P', or rolls back to savepoint and marks 'X' when a debit error code exists; for service 'SPI' with affectation type '12' it resolves the originating service and disables total-order updating. It reads db_biz_pagos..bp_orden and db_sat_his..bp_orden_his, calls sp_grb_mov_y_frmpgo to write the movement and payment form (error 122002 exits via B15 lbl_error), commits and returns on debit error, else proceeds to B10 Commission debit or B14 Success exit; called from B7 Notifications and B8 Accounting account."
+          },
+          {
+            "id": "B10",
+            "name": "B10 Commission debit",
+            "kind": "module",
+            "language": "tsql-sybase",
+            "loc": 100,
+            "file": "sp_debcred_empresa.sp",
+            "lines": "1500-1732",
+            "description": "Node B10 (Commission debit, sp_debcred_empresa.sp lines 1500-1732) charges the company account for the service commission inside the transaction: for TRANSQUICK it substitutes @i_frm_pagcob_spi as the payment form, for TRANSBIMO it sets @i_valor_tarifa to @i_valor_comision, and when @i_valor_comision > 0 it calls sp_grb_comision (line 1518) with reference 'COBRO DE COMISION'. On failure it sets error 122003 (or @w_cod_errord), marks status 'X', rolls back, calls sp_grb_mov_y_frmpgo (line 1628) to record the failed movement, and returns @o_error; otherwise a nonzero @w_cod_errord commits and returns. It is called from B9 and proceeds to B11."
+          },
+          {
+            "id": "B11",
+            "name": "B11 Second SWIFT commission",
+            "kind": "module",
+            "language": "tsql-sybase",
+            "loc": 53,
+            "file": "sp_debcred_empresa.sp",
+            "lines": "1742-1856",
+            "description": "Node B11 \"Second SWIFT commission\" (sp_debcred_empresa.sp lines 1742-1856) applies a second SWIFT commission charge only when @i_valor2_swift is greater than 0 and @i_servicio equals 'TRANSWIFT', debiting the company account for that fee with @i_tipoafec = '16'. It is called from B10 Commission debit and calls sp_grb_comision (line 1746) with @i_valor_comision and @i_valor_tarifa set to @i_valor2_swift; on failure it sets @w_num_error = 122003 (or @w_cod_errord) and goes to B15 lbl_error, or commits and returns @o_error; otherwise flow continues to B12 Order-state update."
+          },
+          {
+            "id": "B12",
+            "name": "B12 Order-state update",
+            "kind": "module",
+            "language": "tsql-sybase",
+            "loc": 98,
+            "file": "sp_debcred_empresa.sp",
+            "lines": "1876-2090",
+            "description": "Node B12 (Order-state update, sp_debcred_empresa.sp lines 1876-2090) marks the payment order as processed after the debit: for channels DIR, SFR, FR2, BTH or VEN it branches on @i_opcion ('01', '02', '03'), otherwise handles forms COB, TRC, CTB, CPD, TPD, setting te_estado_proceso to 'T' and te_codigo_error from @w_cod_errord where state is 'I'. It writes db_biz_pagos..bp_total_orden, falling back to db_sat_his..bp_total_orden_his when @@rowcount is zero; if nothing updates and @w_act_totord = 'S' (service not in TRANSWIFT, IMPADUAN, PAGIESS, TRANSQUICK, TRANSBIMO, PAGOPRV), it raises error 122004. Called from B11; calls B14 or B15 (lbl_error)."
+          },
+          {
+            "id": "B13",
+            "name": "B13 Commented ROLPAGO update",
+            "kind": "module",
+            "language": "tsql-sybase",
+            "loc": 11,
+            "file": "sp_debcred_empresa.sp",
+            "lines": "2098-2124",
+            "description": "Node B13, \"Commented ROLPAGO update\" (sp_debcred_empresa.sp lines 2098-2124), is dead code: the entire block is inside a /* */ comment, so it performs no business action today. As written, it would have set the payment start date (or_fch_inicio_pagcob = @i_fecha_proceso) on bp_orden rows matching @i_orden and @i_servicio when @i_servicio = 'ROLPAGO', raising error 122005 via goto lbl_error on failure. The packet lists no connections: nothing it calls, reads, writes, or is called by."
+          },
+          {
+            "id": "B14",
+            "name": "B14 Success exit",
+            "kind": "module",
+            "language": "tsql-sybase",
+            "loc": 3,
+            "file": "sp_debcred_empresa.sp",
+            "lines": "2130-2136",
+            "description": "Node B14 (\"B14 Success exit\", inside the transaction) is the successful completion point of sp_debcred_empresa: it commits the open transaction with `commit tran` (line 2130), normalises the output error parameter with `select @o_error = isnull(@o_error, 0)` (line 2134) so callers receive 0 rather than null, and exits with `return 0` (line 2136). It calls, reads or writes nothing else; it is reached by calls from B9 (Debit outcome and movement record) and B12 (Order-state update). The packet is thin, so no further behaviour can be supported."
+          }
+        ]
+      },
+      {
+        "id": "dom:err",
+        "name": "Error exit",
+        "kind": "domain",
+        "children": [
+          {
+            "id": "B15",
+            "name": "B15 lbl_error exit",
+            "kind": "module",
+            "language": "tsql-sybase",
+            "loc": 15,
+            "file": "sp_debcred_empresa.sp",
+            "lines": "2140-2170",
+            "description": "Node B15 is the shared error exit (label lbl_error, sp_debcred_empresa.sp lines 2140-2170) of the company-account debit: when any step fails it undoes the pending transaction (rollback tran if @@trancount > 0) and reports the failure code @w_num_error. If @i_aplcobis = 'S' it calls cobis..sp_cerror with @t_from = @i_sp_name and returns @w_num_error; otherwise it sets @o_error and returns 0. It is called from B3, B5, B9, B11 and B12, and calls only sp_cerror."
+          }
+        ]
+      },
+      {
+        "id": "dom:procs",
+        "name": "External procedures (Sybase, not in tree)",
+        "kind": "domain",
+        "children": [
+          {
+            "id": "sp:pa_sat_pnotificacion",
+            "name": "pa_sat_pnotificacion",
+            "kind": "module",
+            "language": "tsql-sybase",
+            "loc": 1,
+            "file": "(not in tree: db_biz_pagos..pa_sat_pnotificacion)",
+            "database": "db_biz_pagos",
+            "description": "pa_sat_pnotificacion is an external procedure in db_biz_pagos whose source is not in the tree; only its call site is known. Judging from its arguments (@i_canal, @i_servicio, @i_orden_banco, @i_secuencial, debit account @i_ctadebito/@i_tipctadeb, credit account @i_ctacred/@i_prod_cre, @i_nombrecred, @i_valor, @i_comision, @i_empresa, @i_direccion_transf) and its outputs (@o_error, @o_msg), it appears to send a notification of a completed payment-order debit/credit. It is called once from dbo.sp_debcred_empresa, block B7 Notifications, line 1052, inside a region marked ref35 VP, capturing @w_return."
+          },
+          {
+            "id": "sp:sp_cerror",
+            "name": "sp_cerror",
+            "kind": "module",
+            "language": "tsql-sybase",
+            "loc": 1,
+            "file": "(not in tree: cobis..sp_cerror)",
+            "database": "cobis",
+            "description": "cobis..sp_cerror is an external Sybase procedure whose source is not in the tree; only its call site is visible. Judging from its arguments, @t_from receiving @i_sp_name (the calling procedure's name) and @i_num receiving @w_num_error, it appears to record or raise a COBIS error identified by number, attributed to the originating procedure. It is called from dbo.sp_debcred_empresa, block B15, at the lbl_error exit (line 2152), immediately before the caller returns @w_num_error; the non-error branch instead sets @o_error and returns 0."
+          },
+          {
+            "id": "sp:sp_con_comision",
+            "name": "sp_con_comision",
+            "kind": "module",
+            "language": "tsql-sybase",
+            "loc": 1,
+            "file": "(not in tree: db_biz_admempresa..sp_con_comision)",
+            "database": "db_biz_admempresa"
+          },
+          {
+            "id": "sp:sp_con_confcontable",
+            "name": "sp_con_confcontable",
+            "kind": "module",
+            "language": "tsql-sybase",
+            "loc": 1,
+            "file": "(not in tree: db_biz_admempresa..sp_con_confcontable)",
+            "database": "db_biz_admempresa",
+            "description": "db_biz_admempresa..sp_con_confcontable is an external Sybase procedure whose source is not in the tree; only its call sites are known. Judging from its arguments (@i_producto, @i_servicio, @i_tipoafec, @i_frm_pagcob, @i_canal, @i_tipcta, @i_moneda, @i_referencia, @i_empresa, and at B5 @i_concepto), it appears to look up the accounting configuration for a company debit, returning transaction code @o_trn and causal @o_cau; a return above 0 means no accounting configuration exists, and B5 defaults the causal to '512'. dbo.sp_debcred_empresa calls it in block B3 (line 322, else branch line 350) and block B5 (line 500)."
+          },
+          {
+            "id": "sp:sp_eventos",
+            "name": "sp_eventos",
+            "kind": "module",
+            "language": "tsql-sybase",
+            "loc": 1,
+            "file": "(not in tree: cob_internet..sp_eventos)",
+            "database": "cob_internet",
+            "description": "cob_internet..sp_eventos is an external Sybase procedure whose source is not in the tree; only its call site is visible. Judging from its arguments, it appears to register a notification event (@i_operacion = 'I', an SMS channel and service via @w_canal_sms and @w_serv_sms, @i_desc_canal) for a company-account debit: it receives the debited account and product (@i_numcta_emp, @i_tipcta_emp, @w_proddeb), the credited account (@w_cta_cre, @w_prodcre), amount (@w_valor_sms), cost (@w_costo_sms), client (@w_ente) and company (@w_emp_inst). It is called once from dbo.sp_debcred_empresa, block B7 Notifications, at line 1210, with the result captured in @w_return."
+          },
+          {
+            "id": "sp:sp_graba_tran_servicio",
+            "name": "sp_graba_tran_servicio",
+            "kind": "module",
+            "language": "tsql-sybase",
+            "loc": 1,
+            "file": "(not in tree: db_biz_pagos..sp_graba_tran_servicio)",
+            "database": "db_biz_pagos",
+            "description": "sp_graba_tran_servicio is an external procedure in db_biz_pagos whose source is not in the tree; only its call site is known. Judging from its arguments (@i_referencia, @i_cta_banco, @i_moneda, @i_causa, @i_saldo, @i_valor, @i_tipo_chequera, @i_orden_banco, @i_secuencial), it appears to record a service transaction for a payment order against a company bank account, with @i_indicador set to 1. dbo.sp_debcred_empresa calls it once, from block B8 (Accounting account, type 9) at line 1284, storing the returned @w_return into @w_cod_errord as the error code."
+          },
+          {
+            "id": "sp:sp_grb_comision",
+            "name": "sp_grb_comision",
+            "kind": "module",
+            "language": "tsql-sybase",
+            "loc": 1,
+            "file": "(not in tree: db_biz_pagos..sp_grb_comision)",
+            "database": "db_biz_pagos",
+            "description": "sp_grb_comision is an external Sybase procedure (db_biz_pagos..sp_grb_comision) whose source is not in the tree; only its call sites exist. Judging from its arguments, it appears to record a commission charged against a payment order: session context (@s_ssn, @s_srv, @s_user, @s_term, @s_ofi), commission channel (@i_canal_comision), company (@i_empresa), product, service, process type, bank order (@i_orden_banco), commission amount (@i_valor_comision), chain (@i_cadena) and card (@i_tarjeta, REF6:GCC). sp_debcred_empresa calls it twice: B10 Commission debit at line 1518 with @i_valor_comision, and B11 Second SWIFT commission at line 1746 with @i_valor2_swift; both capture @w_return."
+          },
+          {
+            "id": "sp:sp_grb_mov_y_frmpgo",
+            "name": "sp_grb_mov_y_frmpgo",
+            "kind": "module",
+            "language": "tsql-sybase",
+            "loc": 1,
+            "file": "(not in tree: db_biz_pagos..sp_grb_mov_y_frmpgo)",
+            "database": "db_biz_pagos"
+          },
+          {
+            "id": "sp:sp_ndc_ahcc",
+            "name": "sp_ndc_ahcc",
+            "kind": "module",
+            "language": "tsql-sybase",
+            "loc": 1,
+            "file": "(not in tree: db_biz_pagos..sp_ndc_ahcc)",
+            "database": "db_biz_pagos",
+            "description": "sp_ndc_ahcc is an external procedure whose source is not in the tree (db_biz_pagos..sp_ndc_ahcc). Judging from its arguments, it appears to post a debit note against a company savings or checking account: it receives the account (@i_numcta_emp), account type (@i_tipcta_emp), causal (@w_causal), amount (@i_valor_debito), currency (@i_mon_debito), card and service (@i_tarjeta, @i_servicio), reference (@w_cadena), provider detail (@i_ref_prov), and session context (@s_ssn, @s_srv, @s_user, @s_term, @s_ofi = 0, @i_fecha_proceso, @w_trn). Its return is captured in @w_return. It is called only from block B6, \"Debit note by account type\", at line 676 of dbo.sp_debcred_empresa."
+          },
+          {
+            "id": "sp:sp_vi_ndc_automatica",
+            "name": "sp_vi_ndc_automatica",
+            "kind": "module",
+            "language": "tsql-sybase",
+            "loc": 1,
+            "file": "(not in tree: cob_virtuales..sp_vi_ndc_automatica)",
+            "database": "cob_virtuales",
+            "description": "cob_virtuales..sp_vi_ndc_automatica is an external Sybase procedure whose source is not in the tree; only its call site is visible. Judging from its arguments, it appears to post an automatic debit note against a company account: it receives the account (@i_numcta_emp), amount (@i_valor_debito), causal (@w_causal), currency (@i_mon_debito), company (@i_empresa), channel 'SAT', account-status check flag 'S', batch, reference string and payment order (@i_orden), returning an error code (@w_cod_errord) and a monetary sequence number (@w_tran_ncnd). It is called once, from dbo.sp_debcred_empresa block B6 \"Debit note by account type\" at line 628."
+          }
+        ]
+      },
+      {
+        "id": "dom:data",
+        "name": "Data stores (Sybase, no DDL in tree)",
+        "kind": "domain",
+        "children": [
+          {
+            "id": "ds:cob_ahorros..ah_cuenta",
+            "name": "cob_ahorros..ah_cuenta",
+            "kind": "datastore",
+            "description": "The table cob_ahorros..ah_cuenta is a Sybase data store in the cob_ahorros domain with no DDL in the tree, so its columns are unknown; judging from its name and its single reader, it appears to hold savings-account master records (inferred from the name only, no DDL confirms this). Within dbo.sp_debcred_empresa the packet records exactly one connection: block B7 Notifications reads it at line 1130. No block writes to it, and no other readers are listed in the packet."
+          },
+          {
+            "id": "ds:cob_cuentas..cc_ctacte",
+            "name": "cob_cuentas..cc_ctacte",
+            "kind": "datastore",
+            "description": "The data store cob_cuentas..cc_ctacte is a Sybase table with no DDL in the tree, so its columns are unknown; judging from its name (cob_cuentas, cc_ctacte) and its sole reader, it appears to hold checking-account (cuenta corriente) records within the COBIS accounts domain, consulted while the company-account debit for payment orders is processed. In the map its only connection is a read from block B7 Notifications at line 1112; no block writes to it, and no other readers are recorded."
+          },
+          {
+            "id": "ds:cob_virtuales..vi_cuenta",
+            "name": "cob_virtuales..vi_cuenta",
+            "kind": "datastore",
+            "description": "The data store cob_virtuales..vi_cuenta appears to hold account records in the COBIS virtual-services (cob_virtuales) domain, presumably company or client accounts that sp_debcred_empresa must resolve before debiting; no DDL is in the tree, so its columns cannot be confirmed. It is a Sybase table read only, never written, by two blocks: B2 Concept resolution reads it at line 300, and B7 Notifications reads it at line 1150, which suggests it supplies both account identification and notification contact data."
+          },
+          {
+            "id": "ds:db_biz_admempresa..ba_tabla",
+            "name": "db_biz_admempresa..ba_tabla",
+            "kind": "datastore",
+            "description": "The data store db_biz_admempresa..ba_tabla appears to be a company-administration reference or lookup table (inferred from its name, \"ba_tabla\", and from the fact that its readers only look up reference strings and notification parameters; no comments confirm this). No DDL for it exists in the tree, so its columns are unknown. Within dbo.sp_debcred_empresa it is read-only: block B5 (Reference string and special causal) reads it at line 486, and block B7 (Notifications) reads it at line 800. No block writes to it."
+          },
+          {
+            "id": "ds:db_biz_pagos..bp_detalle",
+            "name": "db_biz_pagos..bp_detalle",
+            "kind": "datastore",
+            "description": "The data store db_biz_pagos..bp_detalle has no DDL in the tree; the packet records only its map connections, so its contents are inferred, not observed. Judging from its name (a payment-order detail table in the db_biz_pagos database) and its single reader, it appears to hold per-line detail rows for payment orders that dbo.sp_debcred_empresa processes. Within the map it is read only by block B7 Notifications at line 898; no block writes to it anywhere in the packet."
+          },
+          {
+            "id": "ds:db_biz_pagos..bp_orden",
+            "name": "db_biz_pagos..bp_orden",
+            "kind": "datastore",
+            "description": "The table db_biz_pagos..bp_orden is a Sybase data store with no DDL in the tree; its structure is unknown. Judging from its name (bp_orden in the db_biz_pagos database) and its readers, it appears to hold payment orders (ordenes de pago) that the company-account debit acts upon. Within dbo.sp_debcred_empresa it is read-only: block B7 Notifications reads it at line 830, and block B9 Debit outcome and movement record reads it at line 1354. No block writes to it."
+          },
+          {
+            "id": "ds:db_biz_pagos..bp_total_orden",
+            "name": "db_biz_pagos..bp_total_orden",
+            "kind": "datastore",
+            "description": "The data store db_biz_pagos..bp_total_orden is a Sybase table with no DDL in the tree, so its columns are unknown. Judging from its name and its single connection, it appears to hold per-payment-order totals in the db_biz_pagos payments database (inferred from the name; nothing in the packet confirms this). Within dbo.sp_debcred_empresa the only recorded access is a write from block B12 \"Order-state update\" at line 1886; no block reads it in this map."
+          },
+          {
+            "id": "ds:db_sat_his..bp_detalle_his",
+            "name": "db_sat_his..bp_detalle_his",
+            "kind": "datastore",
+            "description": "The data store db_sat_his..bp_detalle_his (packet node ds:db_sat_his..bp_detalle_his, domain \"Data stores (Sybase, no DDL in tree)\") appears to hold historical detail rows of payment-order (\"bp\") processing in the db_sat_his history database, an inference from its name only; no DDL is in the tree, so its columns are unknown. The packet records a single connection: block B7 Notifications reads from it at line 924. No block writes to it within dbo.sp_debcred_empresa."
+          },
+          {
+            "id": "ds:db_sat_his..bp_orden_his",
+            "name": "db_sat_his..bp_orden_his",
+            "kind": "datastore",
+            "description": "The table db_sat_his..bp_orden_his is a Sybase data store with no DDL in the tree; the packet lists only its map connections, so its columns are unknown. Judging from the name (bp_orden_his) and its readers, it appears to hold historical payment-order records, consulted rather than written by dbo.sp_debcred_empresa. It is read-only in this procedure: block B7 Notifications reads it at line 850, and block B9 Debit outcome and movement record reads it at line 1366. No block writes to it."
+          },
+          {
+            "id": "ds:db_sat_his..bp_total_orden_his",
+            "name": "db_sat_his..bp_total_orden_his",
+            "kind": "datastore",
+            "description": "The data store db_sat_his..bp_total_orden_his is a Sybase table with no DDL in the tree, so its columns are unknown. Judging from its name (a history table, \"_his\", of payment-order totals, \"total_orden\") and its single connection, it appears to hold the historical record of order totals/states for payment orders processed by dbo.sp_debcred_empresa. The packet shows only one connection: a write from block B12 Order-state update at line 1908. No block in the packet reads it; readers are not identified."
+          }
+        ]
+      }
+    ]
+  },
+  "edges": [
+    {
+      "source": "B1",
+      "target": "sp:sp_con_comision",
+      "kind": "call",
+      "line": 204
+    },
+    {
+      "source": "B2",
+      "target": "ds:cob_virtuales..vi_cuenta",
+      "kind": "read",
+      "line": 300
+    },
+    {
+      "source": "B3",
+      "target": "sp:sp_con_confcontable",
+      "kind": "call",
+      "line": 322
+    },
+    {
+      "source": "B5",
+      "target": "ds:db_biz_admempresa..ba_tabla",
+      "kind": "read",
+      "line": 486
+    },
+    {
+      "source": "B5",
+      "target": "sp:sp_con_confcontable",
+      "kind": "call",
+      "line": 500
+    },
+    {
+      "source": "B6",
+      "target": "sp:sp_vi_ndc_automatica",
+      "kind": "call",
+      "line": 628
+    },
+    {
+      "source": "B6",
+      "target": "sp:sp_ndc_ahcc",
+      "kind": "call",
+      "line": 676
+    },
+    {
+      "source": "B7",
+      "target": "ds:db_biz_admempresa..ba_tabla",
+      "kind": "read",
+      "line": 800
+    },
+    {
+      "source": "B7",
+      "target": "ds:db_biz_pagos..bp_orden",
+      "kind": "read",
+      "line": 830
+    },
+    {
+      "source": "B7",
+      "target": "ds:db_sat_his..bp_orden_his",
+      "kind": "read",
+      "line": 850
+    },
+    {
+      "source": "B7",
+      "target": "ds:db_biz_pagos..bp_detalle",
+      "kind": "read",
+      "line": 898
+    },
+    {
+      "source": "B7",
+      "target": "ds:db_sat_his..bp_detalle_his",
+      "kind": "read",
+      "line": 924
+    },
+    {
+      "source": "B7",
+      "target": "sp:pa_sat_pnotificacion",
+      "kind": "call",
+      "line": 1052
+    },
+    {
+      "source": "B7",
+      "target": "ds:cob_cuentas..cc_ctacte",
+      "kind": "read",
+      "line": 1112
+    },
+    {
+      "source": "B7",
+      "target": "ds:cob_ahorros..ah_cuenta",
+      "kind": "read",
+      "line": 1130
+    },
+    {
+      "source": "B7",
+      "target": "ds:cob_virtuales..vi_cuenta",
+      "kind": "read",
+      "line": 1150
+    },
+    {
+      "source": "B7",
+      "target": "sp:sp_eventos",
+      "kind": "call",
+      "line": 1210
+    },
+    {
+      "source": "B8",
+      "target": "sp:sp_graba_tran_servicio",
+      "kind": "call",
+      "line": 1284
+    },
+    {
+      "source": "B9",
+      "target": "ds:db_biz_pagos..bp_orden",
+      "kind": "read",
+      "line": 1354
+    },
+    {
+      "source": "B9",
+      "target": "ds:db_sat_his..bp_orden_his",
+      "kind": "read",
+      "line": 1366
+    },
+    {
+      "source": "B9",
+      "target": "sp:sp_grb_mov_y_frmpgo",
+      "kind": "call",
+      "line": 1394
+    },
+    {
+      "source": "B10",
+      "target": "sp:sp_grb_comision",
+      "kind": "call",
+      "line": 1518
+    },
+    {
+      "source": "B10",
+      "target": "sp:sp_grb_mov_y_frmpgo",
+      "kind": "call",
+      "line": 1628
+    },
+    {
+      "source": "B11",
+      "target": "sp:sp_grb_comision",
+      "kind": "call",
+      "line": 1746
+    },
+    {
+      "source": "B12",
+      "target": "ds:db_biz_pagos..bp_total_orden",
+      "kind": "write",
+      "line": 1886
+    },
+    {
+      "source": "B12",
+      "target": "ds:db_sat_his..bp_total_orden_his",
+      "kind": "write",
+      "line": 1908
+    },
+    {
+      "source": "B15",
+      "target": "sp:sp_cerror",
+      "kind": "call",
+      "line": 2152
+    },
+    {
+      "source": "B0",
+      "target": "B1",
+      "kind": "call",
+      "line": 0
+    },
+    {
+      "source": "B1",
+      "target": "B2",
+      "kind": "call",
+      "line": 0
+    },
+    {
+      "source": "B2",
+      "target": "B3",
+      "kind": "call",
+      "line": 0
+    },
+    {
+      "source": "B3",
+      "target": "B4",
+      "kind": "call",
+      "line": 0
+    },
+    {
+      "source": "B3",
+      "target": "B15",
+      "kind": "call",
+      "line": 0
+    },
+    {
+      "source": "B4",
+      "target": "B5",
+      "kind": "call",
+      "line": 0
+    },
+    {
+      "source": "B4",
+      "target": "B8",
+      "kind": "call",
+      "line": 0
+    },
+    {
+      "source": "B5",
+      "target": "B6",
+      "kind": "call",
+      "line": 0
+    },
+    {
+      "source": "B5",
+      "target": "B15",
+      "kind": "call",
+      "line": 0
+    },
+    {
+      "source": "B6",
+      "target": "B7",
+      "kind": "call",
+      "line": 0
+    },
+    {
+      "source": "B7",
+      "target": "B9",
+      "kind": "call",
+      "line": 0
+    },
+    {
+      "source": "B8",
+      "target": "B9",
+      "kind": "call",
+      "line": 0
+    },
+    {
+      "source": "B9",
+      "target": "B14",
+      "kind": "call",
+      "line": 0
+    },
+    {
+      "source": "B9",
+      "target": "B15",
+      "kind": "call",
+      "line": 0
+    },
+    {
+      "source": "B9",
+      "target": "B10",
+      "kind": "call",
+      "line": 0
+    },
+    {
+      "source": "B10",
+      "target": "B11",
+      "kind": "call",
+      "line": 0
+    },
+    {
+      "source": "B11",
+      "target": "B12",
+      "kind": "call",
+      "line": 0
+    },
+    {
+      "source": "B11",
+      "target": "B15",
+      "kind": "call",
+      "line": 0
+    },
+    {
+      "source": "B12",
+      "target": "B14",
+      "kind": "call",
+      "line": 0
+    },
+    {
+      "source": "B12",
+      "target": "B15",
+      "kind": "call",
+      "line": 0
+    }
+  ],
+  "entryPoints": [
+    "B0"
+  ],
+  "deadEnds": [
+    "B13"
+  ],
+  "observations": [
+    "One program, one entry point: the COBIS callers (other procedures and channels, not in the tree) execute dbo.sp_debcred_empresa with 47 parameters; the return convention differs by exit path (B9 :1490, B10 :1700, B15 :2158/:2168).",
+    "Ten external procedures carry every money movement; none is in the tree. sp_con_confcontable is called from three blocks (B3, B5), sp_grb_mov_y_frmpgo from two (B9, B10), sp_grb_comision from two (B10, B11): the call contracts are the single largest unknown.",
+    "Every order read (B7, B9) and the order-state write (B12) fall back from db_biz_pagos to db_sat_his: orders are archived while still in flight, so two stores can hold the same order.",
+    "The transaction opened in B4 has three ends: partial commit after a failed debit (B9), full rollback plus an autocommit write after a failed commission (B10), full rollback in B15. A Java port must reproduce all three over one JDBC connection to ASE (INTENT constraint 2).",
+    "B7 (notifications, 510 lines) is the largest and most coupled block: 5 catalog reads, 3 account tables, 2 external procedures, and it overwrites the debit result (:1248) and an input amount (:886) that B9 then uses.",
+    "B13 is commented out and two commit/return remnants (:1716-1730, :1844-1854) are unreachable; they are listed as observations, not ported.",
+    "Unqualified names (sp_ndc_ahcc, sp_grb_*, pa_sat_pnotificacion, bp_total_orden, bp_detalle) are resolved here to db_biz_pagos by inference; confirm the procedure's home database with the bank.",
+    "Brief §7 A8 (David Balseca, 2026-09-27): unqualified names resolve \"en cobis\", not in db_biz_pagos as this map assumed. Node ids are kept stable; the `database` of sp:sp_ndc_ahcc, sp:sp_grb_mov_y_frmpgo, sp:sp_grb_comision, sp:pa_sat_pnotificacion and the tables bp_total_orden / bp_detalle must be read as pending confirmation of the exact database name at the Phase 1 plan gate. Clarified at the Phase 1 plan gate (2026-09-27): the database is `cobis`."
+  ],
+  "flows": [
+    {
+      "name": "Company pays a supplier from its current account",
+      "persona": "Corporate treasurer of the paying company",
+      "description": "A payment order (TRANSCLI) debits the company's current account, records the movement and commission, notifies the customer and moves the order to 'in transition'.",
+      "steps": [
+        {
+          "label": "Normalize commissions and read the per-transaction tariff",
+          "nodes": [
+            "B1",
+            "sp:sp_con_comision"
+          ]
+        },
+        {
+          "label": "Resolve the accounting transaction code and causal",
+          "nodes": [
+            "B3",
+            "sp:sp_con_confcontable"
+          ]
+        },
+        {
+          "label": "Open the transaction and build the debit reference",
+          "nodes": [
+            "B4",
+            "B5"
+          ]
+        },
+        {
+          "label": "Debit the current account",
+          "nodes": [
+            "B6",
+            "sp:sp_ndc_ahcc"
+          ]
+        },
+        {
+          "label": "Look up beneficiary and send the customer notification",
+          "nodes": [
+            "B7",
+            "ds:db_biz_pagos..bp_detalle",
+            "sp:sp_eventos"
+          ]
+        },
+        {
+          "label": "Record the movement and payment form",
+          "nodes": [
+            "B9",
+            "sp:sp_grb_mov_y_frmpgo"
+          ]
+        },
+        {
+          "label": "Charge the commission",
+          "nodes": [
+            "B10",
+            "sp:sp_grb_comision"
+          ]
+        },
+        {
+          "label": "Mark the order header 'T' and commit",
+          "nodes": [
+            "B12",
+            "ds:db_biz_pagos..bp_total_orden",
+            "B14"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "International SWIFT transfer with two commissions",
+      "persona": "Corporate treasurer sending funds abroad",
+      "description": "A TRANSWIFT order uses the SWIFT code as debit reference, charges the ordinary commission and a second SWIFT commission, and is exempt from the 'order header not found' error.",
+      "steps": [
+        {
+          "label": "Build the 'COD:<swift>' reference",
+          "nodes": [
+            "B5"
+          ]
+        },
+        {
+          "label": "Debit the account",
+          "nodes": [
+            "B6",
+            "sp:sp_ndc_ahcc"
+          ]
+        },
+        {
+          "label": "Read beneficiary institution, with history fallback",
+          "nodes": [
+            "B7",
+            "ds:db_biz_pagos..bp_orden",
+            "ds:db_sat_his..bp_orden_his"
+          ]
+        },
+        {
+          "label": "Record the movement",
+          "nodes": [
+            "B9",
+            "sp:sp_grb_mov_y_frmpgo"
+          ]
+        },
+        {
+          "label": "First commission",
+          "nodes": [
+            "B10",
+            "sp:sp_grb_comision"
+          ]
+        },
+        {
+          "label": "Second SWIFT commission (tipoafec 16)",
+          "nodes": [
+            "B11",
+            "sp:sp_grb_comision"
+          ]
+        },
+        {
+          "label": "Update the order header (exempt if no row) and commit",
+          "nodes": [
+            "B12",
+            "B14"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "A debit is rejected and the rejection is kept on record",
+      "persona": "Operations analyst reviewing failed payments",
+      "description": "The account debit fails (insufficient funds, blocked account): the debit is undone to the savepoint, an error movement is written and committed, and the error code is returned; nothing else runs.",
+      "steps": [
+        {
+          "label": "Debit attempt fails in the account procedure",
+          "nodes": [
+            "B6",
+            "sp:sp_ndc_ahcc"
+          ]
+        },
+        {
+          "label": "Roll back to the savepoint, status 'X'",
+          "nodes": [
+            "B9"
+          ]
+        },
+        {
+          "label": "Write the error movement",
+          "nodes": [
+            "B9",
+            "sp:sp_grb_mov_y_frmpgo"
+          ]
+        },
+        {
+          "label": "Commit the error record and return the code",
+          "nodes": [
+            "B9",
+            "B14"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Commission fails after a successful debit",
+      "persona": "Operations analyst and the audit team",
+      "description": "The commission procedure fails: the whole transaction, debit included, is rolled back; then an error movement is written outside any transaction and the order stays 'I', so it can be re-run.",
+      "steps": [
+        {
+          "label": "Debit succeeds",
+          "nodes": [
+            "B6",
+            "sp:sp_ndc_ahcc",
+            "B9"
+          ]
+        },
+        {
+          "label": "Commission procedure returns an error",
+          "nodes": [
+            "B10",
+            "sp:sp_grb_comision"
+          ]
+        },
+        {
+          "label": "Full rollback (REF44)",
+          "nodes": [
+            "B10"
+          ]
+        },
+        {
+          "label": "Error movement written in autocommit, return",
+          "nodes": [
+            "B10",
+            "sp:sp_grb_mov_y_frmpgo"
+          ]
+        }
+      ]
+    }
+  ]
+}
