@@ -87,10 +87,10 @@ A person fills this in. Claude leaves it blank.
 
 | | |
 |---|---|
-| Name | ________________ |
-| Role | ________________ |
-| Date | __________ |
-| Decision | accept / accept with conditions / reject |
+| Name | David Balseca|
+| Role | SME |
+| Date | 27 sep 2026|
+| Decision accepted|
 
 ## How each verdict is computed
 
