@@ -3,10 +3,10 @@
   "legacy": {
     "ran": false,
     "how": "",
-    "why": "The legacy is a Sybase ASE / COBIS T-SQL stored procedure; no ASE (nor SQL Server) exists on this machine and the bank's test ASE is not reachable (PREFLIGHT 3b, brief section 7 A4). PostgreSQL in Docker is the target-side engine only and cannot run T-SQL. The proof is spec-based: expected values derived by hand from the cited legacy lines and BUSINESS_RULES.md; the ten called procedures are in-memory doubles with the assumed contracts of DATA_OBJECTS.md."
+    "why": "The legacy is a Sybase ASE / COBIS T-SQL stored procedure; no ASE (nor SQL Server) exists on this machine and the bank's test ASE is not reachable (PREFLIGHT 3b, brief section 7 A4). The local PostgreSQL environment runs the Java service against simulated procedures, not the legacy. The proof is spec-based: expected values derived from the cited legacy lines and BUSINESS_RULES.md; the called procedures are in-memory doubles with the assumed contracts of DATA_OBJECTS.md."
   },
   "leftOut": [
-    "Fresh-input check not run: the legacy cannot execute here, so no legacy output exists to compare against; the 10 golden cases in the module's test resources are development cases, not a legacy oracle.",
+    "Fresh-input check not run: the legacy cannot execute here, so no legacy output exists to compare against; the 56 golden cases in the module's test resources are development cases, not a legacy oracle.",
     "Malformed records not tried for the same reason (INTENT.md asks for exact parity, quirks included, so they must be tried once the bank's test ASE is reachable)."
   ],
   "suites": [
@@ -17,26 +17,38 @@
       "junit": ["modernized/debcred/sp_debcred_empresa/target/surefire-reports"],
       "log": ["analysis/debcred/equivalence/sp_debcred_empresa.unit.test-output.txt"],
       "skippedReason": "",
-      "note": "Phase 1 scope only (debit core, exits A and C); notifications, commissions and the order-header update are stubs by the brief's design, so their rules are not tested yet."
+      "note": "Phases 1-4 in scope (all code blocks of the procedure). Called procedures are in-memory doubles; JDBC adapter tests use mocks, not a real ASE."
     }
   ],
   "canaries": [
     {
       "module": "sp_debcred_empresa",
-      "change": "verify's own canary, in a scratch copy: lbl_error's mode test flipped from @i_aplcobis = 'S' to 'N' (RULE-028: which channel carries the error code)",
+      "change": "verify's own canary (Phase 4), in a scratch copy: beneficiary account type 8 mapped to 'CON' instead of 'ESP' (RULE-004/RULE-005, lines 968-972)",
+      "junit": ["analysis/debcred/equivalence/canary/sp_debcred_empresa/verify-prodcre8"],
+      "log": []
+    },
+    {
+      "module": "sp_debcred_empresa",
+      "change": "transform's canary (Phase 4): sp_eventos return status ignored, line 1248 (RULE-034)",
+      "junit": ["analysis/debcred/equivalence/canary/sp_debcred_empresa/notif-1248-ignored"],
+      "log": []
+    },
+    {
+      "module": "sp_debcred_empresa",
+      "change": "transform's canary (Phase 4): @wRowdbBiz counted after the history fallback (A17, RULE-010)",
+      "junit": ["analysis/debcred/equivalence/canary/sp_debcred_empresa/notif-a17-after-history"],
+      "log": []
+    },
+    {
+      "module": "sp_debcred_empresa",
+      "change": "transform's canary (Phase 4): highest SMS catalogue code instead of the lowest (A16, RULE-035)",
+      "junit": ["analysis/debcred/equivalence/canary/sp_debcred_empresa/notif-a16-highest"],
+      "log": []
+    },
+    {
+      "module": "sp_debcred_empresa",
+      "change": "earlier verify canary (Phase 1 code), in a scratch copy: lbl_error's mode test flipped from @i_aplcobis = 'S' to 'N' (RULE-028)",
       "junit": ["analysis/debcred/equivalence/canary/sp_debcred_empresa/verify-errorexit-mode"],
-      "log": []
-    },
-    {
-      "module": "sp_debcred_empresa",
-      "change": "transform's canary: rollback to the savepoint replaced by a full rollback (RULE-012 exit A)",
-      "junit": ["analysis/debcred/equivalence/canary/sp_debcred_empresa/savepoint"],
-      "log": []
-    },
-    {
-      "module": "sp_debcred_empresa",
-      "change": "transform's canary: commission count truncation DOWN changed to HALF_UP (RULE-002)",
-      "junit": ["analysis/debcred/equivalence/canary/sp_debcred_empresa/truncation"],
       "log": []
     }
   ]
