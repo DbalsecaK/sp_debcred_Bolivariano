@@ -165,6 +165,10 @@ Brief Phase 3, entry criteria met (Phase 2 exit criteria; section 7 A5 assumed c
 | M3 | `in (NULL)` depends on `ansinull` and column nullability | Documented on the adapter; **to confirm on the bank's ASE together with the DDL** |
 | L1-L4 | Enum for the table; SQLState in logs; `Integer codErrord`; `null` as a signal | SQLState/code now logged; the rest kept (the table is always a literal or a validated identifier; `codErrord` is 0 on this path; the contract pins the shapes) |
 
+## Local PostgreSQL test environment (profile `local-pg`), 2026-09-27
+
+Decided by David Balseca: PostgreSQL in Docker is a **local test environment**, not the migration target; production still calls the COBIS procedures in Sybase ASE (profile `ase`). `local-pg/` holds the schema with the ten procedures simulated in PL/pgSQL, a run script and a sample request; `localpg/PgAseSession` adapts the service with JDBC transactions plus a per-statement savepoint (Sybase statement-level atomicity). Verified end to end over HTTP: happy path, exit A, exit B and a 400; results in `local-pg/README.md`. This is a runnable demonstration of the transaction contract, **not** equivalence with the real procedures: the simulations answer what `sim.falla` tells them.
+
 ## Side by side: exit A (debit failed), legacy 1332-1342 and 1480-1492 vs the service
 
 The block below is generated from the sources (`diff -y --width=160`); the legacy range holds no credential.

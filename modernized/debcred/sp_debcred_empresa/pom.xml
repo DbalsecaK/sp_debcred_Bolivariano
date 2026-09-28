@@ -40,7 +40,12 @@
             <version>${jtds.version}</version>
             <scope>runtime</scope>
         </dependency>
-        <!-- PostgreSQL (service-owned state, brief section 7 A3) and H2 join when a phase uses them. -->
+        <!-- Local PostgreSQL test environment (profile local-pg, local-pg/debcred-local.sql). -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-webmvc-test</artifactId>

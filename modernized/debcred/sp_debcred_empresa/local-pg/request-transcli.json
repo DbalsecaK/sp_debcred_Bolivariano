@@ -1,0 +1,12 @@
+{"sSsn": 1234, "sUser": "usrtest", "sTerm": "TERM01", "sSrv": "srvtest", "sOfi": 1,
+ "iAplcobis": "N", "iSpName": "sp_test", "iOrden": 123456, "iOrdenEmpresa": 77,
+ "iFechaProceso": "2026-09-27T10:15:30", "iNemEmp": "EMPTEST", "iEmpresa": 500, "iProducto": 1,
+ "iServicio": "TRANSCLI", "iFrmPagcob": "CUE", "iFrmPagcobSpi": null, "iCanal": "DIR", "iTipoAfec": "10",
+ "iReferencia": "REF TEST", "iMonDebito": 1, "iPaisCta": 1, "iCodBancoCta": 1,
+ "iTipctaEmp": 3, "iNumctaEmp": "0000012345",
+ "iValorOrdenado": 12.10, "iValorDebito": 12.10, "iComision": 0.50, "iValorComision": 0,
+ "iTipoReferencia": "1", "iTarjeta": null, "iRefProv": "PROV", "iOpcion": "01", "iTipoPagcob": "CUE",
+ "iLocalidadOrden": 1, "iTipoProceso": "P", "iFrmPagcobDeb": null,
+ "iValor2Swift": 0, "iSecuencial": 0, "iCodSwift": null,
+ "iValorTarifa": null, "iValorComisionCue": null, "iValorTarifaEfe": null,
+ "iValorComisionEfe": null, "iValorTarifaChe": null, "iValorComisionChe": null}

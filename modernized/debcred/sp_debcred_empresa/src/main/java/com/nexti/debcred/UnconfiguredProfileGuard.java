@@ -11,13 +11,13 @@ import org.springframework.context.annotation.Profile;
  * is the first thing an operator sees.
  */
 @Configuration(proxyBeanMethods = false)
-@Profile("!ase")
+@Profile("!ase & !local-pg")
 class UnconfiguredProfileGuard {
 
     @Bean
     static BeanFactoryPostProcessor refuseWithoutAse() {
         return beanFactory -> {
-            throw new IllegalStateException("sp-debcred-empresa needs SPRING_PROFILES_ACTIVE=ase and DEBCRED_ASE_URL, "
+            throw new IllegalStateException("sp-debcred-empresa needs SPRING_PROFILES_ACTIVE=ase (Sybase) or local-pg (local PostgreSQL test environment) and DEBCRED_ASE_URL, "
                     + "DEBCRED_ASE_USERNAME and DEBCRED_ASE_PASSWORD: every debit runs through the Sybase ASE "
                     + "procedures (MODERNIZATION_BRIEF.md section 2).");
         };
