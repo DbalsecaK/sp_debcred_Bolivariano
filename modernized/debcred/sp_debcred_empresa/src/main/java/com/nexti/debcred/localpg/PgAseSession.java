@@ -6,6 +6,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Savepoint;
 import java.sql.Types;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -19,6 +20,9 @@ import com.nexti.debcred.AccountingConfigurationQuery;
 import com.nexti.debcred.AsePortException;
 import com.nexti.debcred.AseSession;
 import com.nexti.debcred.AseTransactionAbortedException;
+import com.nexti.debcred.BasicNotificationCommand;
+import com.nexti.debcred.BasicNotificationResult;
+import com.nexti.debcred.BeneficiaryDetail;
 import com.nexti.debcred.CommissionCommand;
 import com.nexti.debcred.CommissionResult;
 import com.nexti.debcred.CommissionTariffQuery;
@@ -26,10 +30,15 @@ import com.nexti.debcred.CommissionTariffResult;
 import com.nexti.debcred.DebitNoteCommand;
 import com.nexti.debcred.DebitNoteResult;
 import com.nexti.debcred.ErrorReport;
+import com.nexti.debcred.EventCommand;
+import com.nexti.debcred.EventResult;
+import com.nexti.debcred.InterbankCreditDetail;
 import com.nexti.debcred.LedgerDebitCommand;
 import com.nexti.debcred.LedgerDebitResult;
 import com.nexti.debcred.MovementCommand;
 import com.nexti.debcred.MovementResult;
+import com.nexti.debcred.SwiftCreditDetail;
+import com.nexti.debcred.VirtualAccountOwner;
 import com.nexti.debcred.VirtualDebitNoteCommand;
 import com.nexti.debcred.VirtualDebitNoteResult;
 
@@ -185,9 +194,131 @@ public final class PgAseSession implements AseSession {
     @Override
     public Optional<String> ndcorpeiConcept() {
         return queryString("select c.ct_cod_catalogo from db_biz_admempresa.ba_tabla t"
-                + " join db_biz_admempresa.ba_catalogo c on c.ct_tabla = t.tb_codigo"
-                + " where t.tb_tabla = 'ad_concepto_contable' and c.ct_otro_campo_catalogo = 'NDCORPEI'"
-                + " and c.ct_estado = 'A'", ps -> { });
+                + " join db_biz_admempresa.ba_catalogo c on c.ct_cod_tabla = t.tb_cod_tabla"
+                + " where t.tb_nom_tabla = 'ad_concepto_contable'"
+                + " and coalesce(c.ct_otro_campo_catalogo, '') = 'NDCORPEI' and c.ct_est_catalogo = 'A'", ps -> { });
+    }
+
+    // ---- notifications (B7): the legacy predicates with Sybase char semantics (trailing blanks ignored) ----
+
+    @Override
+    public List<String> smsServiceCodes(String servicio, String canalSms) {
+        return queryRows("select c.ct_cod_catalogo from db_biz_admempresa.ba_tabla t"
+                + " join db_biz_admempresa.ba_catalogo c on c.ct_cod_tabla = t.tb_cod_tabla"
+                + " where t.tb_nom_tabla = 'ad_servicios_sms' and c.ct_nom_catalogo like '%' || btrim(?, ' ') || '%'"
+                + " and right(btrim(c.ct_cod_catalogo, ' '), 3) = rtrim(?) and c.ct_est_catalogo = 'A'"
+                + " order by c.ct_cod_catalogo collate \"C\"", ps -> {
+                    ps.setString(1, servicio);
+                    ps.setString(2, canalSms);
+                }, rs -> rs.getString(1));
+    }
+
+    @Override
+    public Optional<String> notificationClass(String servicio) {
+        return queryString("select c.ct_otro_campo_catalogo from db_biz_admempresa.ba_tabla t"
+                + " join db_biz_admempresa.ba_catalogo c on c.ct_cod_tabla = t.tb_cod_tabla"
+                + " where t.tb_nom_tabla = 'ad_notificacion_basica' and rtrim(c.ct_cod_catalogo) = rtrim(?)"
+                + " and t.tb_est_tabla = 'A' and c.ct_est_catalogo = 'A'", ps -> ps.setString(1, servicio));
+    }
+
+    @Override
+    public boolean notificationBlocked(String servicio, String servicioSms, String spName) {
+        return queryString("select '1' from db_biz_admempresa.ba_tabla t"
+                + " join db_biz_admempresa.ba_catalogo c on c.ct_cod_tabla = t.tb_cod_tabla"
+                + " where t.tb_nom_tabla = 'ba_bloqueaNotificacionSAT'"
+                + " and rtrim(coalesce(c.ct_nom_catalogo, '')) = rtrim(?) || '-' || rtrim(?)"
+                + " and rtrim(coalesce(c.ct_otro_campo_catalogo, '')) = rtrim(?) and c.ct_est_catalogo = 'A'", ps -> {
+                    ps.setString(1, servicio);
+                    ps.setString(2, servicioSms);
+                    ps.setString(3, spName);
+                }).isPresent();
+    }
+
+    @Override
+    public List<SwiftCreditDetail> liveSwiftCreditDetails(Integer ordenBanco, Integer secuencial, Integer ordenante) {
+        return swiftCreditDetails("db_biz_pagos.bp_orden", "db_biz_pagos.bp_detalle", ordenBanco, secuencial, ordenante);
+    }
+
+    @Override
+    public List<SwiftCreditDetail> historySwiftCreditDetails(Integer ordenBanco, Integer secuencial, Integer ordenante) {
+        return swiftCreditDetails("db_sat_his.bp_orden_his", "db_sat_his.bp_detalle_his", ordenBanco, secuencial,
+                ordenante);
+    }
+
+    private List<SwiftCreditDetail> swiftCreditDetails(String orders, String details, Integer ordenBanco,
+                                                       Integer secuencial, Integer ordenante) {
+        return queryRows("select d.dt_referencia_grupo, d.dt_nom_cuenta from " + orders + " o join " + details
+                + " d on d.dt_orden_banco = o.or_orden_banco"
+                + " where o.or_orden_banco = ? and d.dt_secuencial = ? and o.or_ordenante = ?", ps -> {
+                    ps.setObject(1, ordenBanco, Types.INTEGER);
+                    ps.setObject(2, secuencial, Types.INTEGER);
+                    ps.setObject(3, ordenante, Types.INTEGER);
+                }, rs -> new SwiftCreditDetail(rs.getString(1), rs.getString(2)));
+    }
+
+    @Override
+    public List<InterbankCreditDetail> liveInterbankCreditDetails(Integer ordenBanco) {
+        return interbankCreditDetails("db_biz_pagos.bp_detalle", ordenBanco);
+    }
+
+    @Override
+    public List<InterbankCreditDetail> historyInterbankCreditDetails(Integer ordenBanco) {
+        return interbankCreditDetails("db_sat_his.bp_detalle_his", ordenBanco);
+    }
+
+    private List<InterbankCreditDetail> interbankCreditDetails(String details, Integer ordenBanco) {
+        return queryRows("select c.ct_nom_catalogo, d.dt_tipo_cta, d.dt_numero_cuenta from " + details + " d,"
+                + " db_biz_admempresa.ba_tabla t join db_biz_admempresa.ba_catalogo c on c.ct_cod_tabla = t.tb_cod_tabla"
+                + " where d.dt_orden_banco = ? and rtrim(d.dt_referencia_grupo) = rtrim(substring(c.ct_nom_catalogo, 1, 9))"
+                + " and t.tb_nom_tabla = 'ad_cuentas_bce' and t.tb_est_tabla = 'A' and c.ct_est_catalogo = 'A'",
+                ps -> ps.setObject(1, ordenBanco, Types.INTEGER),
+                rs -> new InterbankCreditDetail(rs.getString(1), (Integer) rs.getObject(2), rs.getString(3)));
+    }
+
+    @Override
+    public List<BeneficiaryDetail> liveBeneficiaryDetails(Integer ordenBanco) {
+        return beneficiaryDetails("cobis.bp_detalle", ordenBanco);
+    }
+
+    @Override
+    public List<BeneficiaryDetail> historyBeneficiaryDetails(Integer ordenBanco) {
+        return beneficiaryDetails("db_sat_his.bp_detalle_his", ordenBanco);
+    }
+
+    private List<BeneficiaryDetail> beneficiaryDetails(String details, Integer ordenBanco) {
+        return queryRows("select dt_nombre_beneficiario, dt_referencia_grupo from " + details + " where dt_orden_banco = ?",
+                ps -> ps.setObject(1, ordenBanco, Types.INTEGER),
+                rs -> new BeneficiaryDetail(rs.getString(1), rs.getString(2)));
+    }
+
+    @Override
+    public Optional<Integer> currentAccountClient(String ctaBanco) {
+        return queryInteger("select cc_cliente from cob_cuentas.cc_ctacte where cc_cta_banco = ?", ctaBanco);
+    }
+
+    @Override
+    public Optional<Integer> savingsAccountClient(String ctaBanco) {
+        return queryInteger("select ah_cliente from cob_ahorros.ah_cuenta where ah_cta_banco = ?", ctaBanco);
+    }
+
+    @Override
+    public Optional<VirtualAccountOwner> virtualAccountOwner(String ctaBanco) {
+        List<VirtualAccountOwner> rows = queryRows(
+                "select vi_cliente, vi_prod_banc from cob_virtuales.vi_cuenta where vi_cta_banco = ?",
+                ps -> ps.setString(1, ctaBanco),
+                rs -> new VirtualAccountOwner((Integer) rs.getObject(1), (Integer) rs.getObject(2)));
+        return rows.isEmpty() ? Optional.empty() : Optional.of(rows.get(0));
+    }
+
+    @Override
+    public BasicNotificationResult notifyBasic(BasicNotificationCommand c) {
+        return call("cobis.pa_sat_pnotificacion", c,
+                rs -> new BasicNotificationResult(rs.getInt(1), (Integer) rs.getObject(2), rs.getString(3)));
+    }
+
+    @Override
+    public EventResult registerEvent(EventCommand c) {
+        return call("cob_internet.sp_eventos", c, rs -> new EventResult(rs.getInt(1)));
     }
 
     @Override
@@ -279,6 +410,27 @@ public final class PgAseSession implements AseSession {
                 }
             }
         });
+    }
+
+    /** Every row, in order: the list size is the legacy's {@code @@rowcount}. */
+    private <T> List<T> queryRows(String sql, Binder bind, Reader<T> map) {
+        return statement("query", () -> {
+            try (PreparedStatement ps = connection.prepareStatement(sql)) {
+                bind.bind(ps);
+                try (ResultSet rs = ps.executeQuery()) {
+                    List<T> rows = new ArrayList<>();
+                    while (rs.next()) {
+                        rows.add(map.read(rs));
+                    }
+                    return rows;
+                }
+            }
+        });
+    }
+
+    private Optional<Integer> queryInteger(String sql, String key) {
+        List<Integer> rows = queryRows(sql, ps -> ps.setString(1, key), rs -> (Integer) rs.getObject(1));
+        return rows.isEmpty() ? Optional.empty() : Optional.ofNullable(rows.get(0));
     }
 
     /** One statement with Sybase statement-level atomicity: inside a transaction, its own savepoint. */

@@ -103,8 +103,8 @@ public final class Requests {
     public Requests codBancoCta(Integer v) { this.iCodBancoCta = v; return this; }
     public Requests tipctaEmp(Integer v) { this.iTipctaEmp = v; return this; }
     public Requests numctaEmp(String v) { this.iNumctaEmp = v; return this; }
-    public Requests valorOrdenado(String v) { this.iValorOrdenado = money(v); return this; }
-    public Requests valorDebito(String v) { this.iValorDebito = money(v); return this; }
+    public Requests valorOrdenado(String v) { this.iValorOrdenado = v == null ? null : money(v); return this; }
+    public Requests valorDebito(String v) { this.iValorDebito = v == null ? null : money(v); return this; }
     public Requests comision(String v) { this.iComision = v == null ? null : money(v); return this; }
     public Requests valorComision(String v) { this.iValorComision = v == null ? null : money(v); return this; }
     public Requests tipoReferencia(String v) { this.iTipoReferencia = v; return this; }

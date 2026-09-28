@@ -1,0 +1,178 @@
+{
+  "_comment": "Phase 4 golden cases for sp_debcred_empresa: notifications B7 (lines 746-1256) and what they leave for B9-B15 (RULE-034/035/019/003/004/011/005/006/036/021/012, brief 7 A15/A16/A17). Expected values are the LEGACY behavior read from legacy/debcred/sp_debcred_empresa.sp (spec-based; no ASE available, brief section 7 A4). Same schema as phase3-cases.json plus the optional inputs valorDebito, valorOrdenado, spName, numcta (JSON null = NULL account), secuencial, smsServices [{code, name}] (active ad_servicios_sms rows), notificationClass (ct_otro_campo_catalogo of ad_notificacion_basica for the request's service), blocked [{key, spName}] (ba_bloqueaNotificacionSAT), bceInstitutions [ct_nom_catalogo of ad_cuentas_bce], interbankDetails [{table LIVE|HISTORY, referenciaGrupo, tipoCta, numeroCuenta}], swiftDetails [{table, secuencial, referenciaGrupo, nomCuenta}] (order 123456, ordering company = company), beneficiaryDetails [{table, nombre, referenciaGrupo}], currentOwner (cc_cliente of the account), virtualOwner {cliente, prodBanc}, eventReturnCode, basicReturnCode, basicOError (null = NULL @o_error). Optional expected: oError may be null (NULL @o_error), events / basicNotifications (call counts), movementValor (@i_valor_mov of the first movement), event {field: value} (sp_eventos arguments; canal compared ignoring trailing blanks), priorRowCount (@wRowdbBiz as B12 finds it; null = NULL). Fake data only.",
+  "cases": [
+    {
+      "name": "TRANSCLI on DIR, detail live: sp_eventos, movement with the ordered value, @wRowdbBiz 1",
+      "rules": ["RULE-034", "RULE-035", "RULE-003", "RULE-004", "RULE-006"],
+      "accountType": 3, "service": "TRANSCLI", "aplcobis": "N", "company": 500,
+      "accountingReturnCode": 0, "debitReturnCode": 0, "movementReturnCode": 0,
+      "canal": "DIR", "opcion": "02", "comision": "0.50", "valorComision": null,
+      "valorDebito": "100.50", "valorOrdenado": "100.00",
+      "smsServices": [{"code": "TRC-SAT", "name": "NOTIFICA TRANSCLI"}],
+      "bceInstitutions": ["000000017BANCO DESTINO FAKE"],
+      "interbankDetails": [{"table": "LIVE", "referenciaGrupo": "000000017", "tipoCta": 4, "numeroCuenta": "2200334455"}],
+      "currentOwner": 700001,
+      "expected": { "returnCode": 0, "oError": 0, "exit": "OK", "begins": 1, "commits": 1, "rollbacks": 0,
+                    "movementStatus": "P", "committed": ["sp_ndc_ahcc", "sp_eventos", "sp_grb_mov_y_frmpgo"], "cerror": false,
+                    "events": 1, "basicNotifications": 0, "movementValor": "100.00", "priorRowCount": 1,
+                    "event": {"canal": "SAT", "servicio": "TRC", "valor": "100.00", "costo": "0.50", "prodDeb": "CTE",
+                              "prodCre": "AHO", "ctaCre": "2200334455", "empresa": "BANCO DESTINO FAKE", "cliente": 700001,
+                              "descCanal": "SAT"} }
+    },
+    {
+      "name": "A17: TRANSCLI, DIR, option 04, detail only in history -> @wRowdbBiz 0 -> 122004, full rollback",
+      "rules": ["RULE-010", "RULE-004", "RULE-014"],
+      "accountType": 3, "service": "TRANSCLI", "aplcobis": "N", "company": 500,
+      "accountingReturnCode": 0, "debitReturnCode": 0, "movementReturnCode": 0,
+      "canal": "DIR", "opcion": "04", "valorDebito": "100.50", "valorOrdenado": "100.00",
+      "smsServices": [{"code": "TRC-SAT", "name": "NOTIFICA TRANSCLI"}],
+      "bceInstitutions": ["000000017BANCO DESTINO FAKE"],
+      "interbankDetails": [{"table": "HISTORY", "referenciaGrupo": "000000017", "tipoCta": 4, "numeroCuenta": "2200334455"}],
+      "currentOwner": 700001, "headerRows": [],
+      "expected": { "returnCode": 0, "oError": 122004, "exit": "C", "begins": 1, "commits": 0, "rollbacks": 1,
+                    "movementStatus": "P", "committed": [], "cerror": false, "events": 1, "headerUpdates": 0,
+                    "priorRowCount": 0 }
+    },
+    {
+      "name": "A17: same in COBIS mode -> sp_cerror, (122004, 0)",
+      "rules": ["RULE-010", "RULE-028"],
+      "accountType": 3, "service": "TRANSCLI", "aplcobis": "S", "company": 500,
+      "accountingReturnCode": 0, "debitReturnCode": 0, "movementReturnCode": 0,
+      "canal": "DIR", "opcion": "04",
+      "smsServices": [{"code": "TRC-SAT", "name": "NOTIFICA TRANSCLI"}],
+      "bceInstitutions": ["000000017BANCO DESTINO FAKE"],
+      "interbankDetails": [{"table": "HISTORY", "referenciaGrupo": "000000017", "tipoCta": 4, "numeroCuenta": "2200334455"}],
+      "headerRows": [],
+      "expected": { "returnCode": 122004, "oError": 0, "exit": "C", "begins": 1, "commits": 0, "rollbacks": 1,
+                    "movementStatus": "P", "committed": [], "cerror": true, "priorRowCount": 0 }
+    },
+    {
+      "name": "TRANSWIFT, detail archived in db_sat_his, cost 12.00 + 5.00, two commissions, exempt from 122004",
+      "rules": ["RULE-019", "RULE-006", "RULE-016", "RULE-010"],
+      "accountType": 3, "service": "TRANSWIFT", "aplcobis": "N", "company": 500,
+      "accountingReturnCode": 0, "debitReturnCode": 0, "movementReturnCode": 0,
+      "canal": "DIR", "opcion": "02", "codSwift": "BICFAKEX", "secuencial": 2,
+      "comision": "0", "valorComision": "12.00", "valor2Swift": "5.00",
+      "valorDebito": "1000.00", "valorOrdenado": "1000.00",
+      "commissionReturnCode": 0, "commissionOError": 0, "secondCommissionReturnCode": 0, "secondCommissionOError": 0,
+      "smsServices": [{"code": "TSW-SAT", "name": "NOTIFICA TRANSWIFT"}],
+      "swiftDetails": [{"table": "HISTORY", "secuencial": 2, "referenciaGrupo": "GRPEXT001", "nomCuenta": "CUENTA BENEFICIARIO EXTERIOR FAKE 0001"}],
+      "currentOwner": 700001, "headerRows": [],
+      "expected": { "returnCode": 0, "oError": 0, "exit": "OK", "begins": 1, "commits": 1, "rollbacks": 0,
+                    "movementStatus": "P", "committed": ["sp_ndc_ahcc", "sp_eventos", "sp_grb_mov_y_frmpgo", "sp_grb_comision", "sp_grb_comision"],
+                    "cerror": false, "events": 1, "movementValor": "1000.00", "headerUpdates": 2,
+                    "event": {"valor": "1000.00", "costo": "17.00", "empresa": "GRPEXT001", "ctaCre": "CUENTA BENEFICIARIO EXTERIOR F", "prodCre": null} }
+    },
+    {
+      "name": "ROLPAGO, sp_eventos returns 30001 -> exit A, debit and event reversed",
+      "rules": ["RULE-034", "RULE-012"],
+      "accountType": 3, "service": "ROLPAGO", "aplcobis": "N", "company": 500,
+      "accountingReturnCode": 0, "debitReturnCode": 0, "movementReturnCode": 0,
+      "smsServices": [{"code": "ROL-SAT", "name": "NOTIFICA ROLPAGO"}], "currentOwner": 700001, "eventReturnCode": 30001,
+      "expected": { "returnCode": 30001, "oError": 30001, "exit": "A", "begins": 1, "commits": 1, "rollbacks": 0,
+                    "movementStatus": "X", "committed": ["sp_grb_mov_y_frmpgo"], "cerror": false, "events": 1 }
+    },
+    {
+      "name": "ROLPAGO, sp_eventos returns 30001, COBIS -> exit A, same result, no sp_cerror",
+      "rules": ["RULE-034", "RULE-012"],
+      "accountType": 3, "service": "ROLPAGO", "aplcobis": "S", "company": 500,
+      "accountingReturnCode": 0, "debitReturnCode": 0, "movementReturnCode": 0,
+      "smsServices": [{"code": "ROL-SAT", "name": "NOTIFICA ROLPAGO"}], "currentOwner": 700001, "eventReturnCode": 30001,
+      "expected": { "returnCode": 30001, "oError": 30001, "exit": "A", "begins": 1, "commits": 1, "rollbacks": 0,
+                    "movementStatus": "X", "committed": ["sp_grb_mov_y_frmpgo"], "cerror": false }
+    },
+    {
+      "name": "TRANSCLI, sp_eventos fails -> exit A, the 'X' movement carries the ordered value",
+      "rules": ["RULE-003", "RULE-012", "RULE-034"],
+      "accountType": 3, "service": "TRANSCLI", "aplcobis": "N", "company": 500,
+      "accountingReturnCode": 0, "debitReturnCode": 0, "movementReturnCode": 0,
+      "valorDebito": "100.50", "valorOrdenado": "100.00",
+      "smsServices": [{"code": "TRC-SAT", "name": "NOTIFICA TRANSCLI"}], "currentOwner": 700001, "eventReturnCode": 7,
+      "expected": { "returnCode": 7, "oError": 7, "exit": "A", "begins": 1, "commits": 1, "rollbacks": 0,
+                    "movementStatus": "X", "committed": ["sp_grb_mov_y_frmpgo"], "cerror": false, "movementValor": "100.00" }
+    },
+    {
+      "name": "A15: ROLPAGO classified 'B', pa_sat_pnotificacion returns 0 with @o_error 5 -> (0, 5)",
+      "rules": ["RULE-036", "RULE-034"],
+      "accountType": 3, "service": "ROLPAGO", "aplcobis": "N", "company": 500,
+      "accountingReturnCode": 0, "debitReturnCode": 0, "movementReturnCode": 0,
+      "smsServices": [{"code": "ROL-SAT", "name": "NOTIFICA ROLPAGO"}], "notificationClass": "B",
+      "beneficiaryDetails": [{"table": "LIVE", "nombre": "BENEFICIARIO FAKE", "referenciaGrupo": "GRP000001"}],
+      "basicReturnCode": 0, "basicOError": 5,
+      "expected": { "returnCode": 0, "oError": 5, "exit": "OK", "begins": 1, "commits": 1, "rollbacks": 0,
+                    "movementStatus": "P", "committed": ["sp_ndc_ahcc", "pa_sat_pnotificacion", "sp_grb_mov_y_frmpgo"],
+                    "cerror": false, "events": 0, "basicNotifications": 1, "priorRowCount": null }
+    },
+    {
+      "name": "A15: 'B' with a NULL notifier @o_error -> isnull -> (0, 0)",
+      "rules": ["RULE-036"],
+      "accountType": 3, "service": "ROLPAGO", "aplcobis": "N", "company": 500,
+      "accountingReturnCode": 0, "debitReturnCode": 0, "movementReturnCode": 0,
+      "smsServices": [{"code": "ROL-SAT", "name": "NOTIFICA ROLPAGO"}], "notificationClass": "B",
+      "basicReturnCode": 0, "basicOError": null,
+      "expected": { "returnCode": 0, "oError": 0, "exit": "OK", "begins": 1, "commits": 1, "rollbacks": 0,
+                    "movementStatus": "P", "committed": ["sp_ndc_ahcc", "pa_sat_pnotificacion", "sp_grb_mov_y_frmpgo"],
+                    "cerror": false, "basicNotifications": 1 }
+    },
+    {
+      "name": "A15: 'B' @o_error 5, COBIS, no header row -> exit C keeps @o_error: (122004, 5)",
+      "rules": ["RULE-036", "RULE-010", "RULE-028"],
+      "accountType": 3, "service": "ROLPAGO", "aplcobis": "S", "company": 500,
+      "accountingReturnCode": 0, "debitReturnCode": 0, "movementReturnCode": 0, "canal": "DIR", "opcion": "02",
+      "smsServices": [{"code": "ROL-SAT", "name": "NOTIFICA ROLPAGO"}], "notificationClass": "B",
+      "basicReturnCode": 0, "basicOError": 5, "headerRows": [],
+      "expected": { "returnCode": 122004, "oError": 5, "exit": "C", "begins": 1, "commits": 0, "rollbacks": 1,
+                    "movementStatus": "P", "committed": [], "cerror": true }
+    },
+    {
+      "name": "A15: 'B' NULL @o_error, COBIS, no header row -> (122004, NULL)",
+      "rules": ["RULE-036", "RULE-010", "RULE-028"],
+      "accountType": 3, "service": "ROLPAGO", "aplcobis": "S", "company": 500,
+      "accountingReturnCode": 0, "debitReturnCode": 0, "movementReturnCode": 0, "canal": "DIR", "opcion": "02",
+      "smsServices": [{"code": "ROL-SAT", "name": "NOTIFICA ROLPAGO"}], "notificationClass": "B",
+      "basicReturnCode": 0, "basicOError": null, "headerRows": [],
+      "expected": { "returnCode": 122004, "oError": null, "exit": "C", "begins": 1, "commits": 0, "rollbacks": 1,
+                    "movementStatus": "P", "committed": [], "cerror": true }
+    },
+    {
+      "name": "RULE-021: ROLPAGO blocked for the calling procedure -> no event, commit (0, 0)",
+      "rules": ["RULE-021", "RULE-034"],
+      "accountType": 3, "service": "ROLPAGO", "aplcobis": "N", "company": 500, "spName": "sp_x_fake",
+      "accountingReturnCode": 0, "debitReturnCode": 0, "movementReturnCode": 0,
+      "smsServices": [{"code": "ROL-SAT", "name": "NOTIFICA ROLPAGO"}], "currentOwner": 700001,
+      "blocked": [{"key": "ROLPAGO-ROL", "spName": "sp_x_fake"}], "eventReturnCode": 30001,
+      "expected": { "returnCode": 0, "oError": 0, "exit": "OK", "begins": 1, "commits": 1, "rollbacks": 0,
+                    "movementStatus": "P", "committed": ["sp_ndc_ahcc", "sp_grb_mov_y_frmpgo"], "cerror": false, "events": 0 }
+    },
+    {
+      "name": "RULE-021: channel BCE, ROLPAGO, NULL debit account -> no event, commit",
+      "rules": ["RULE-021"],
+      "accountType": 3, "service": "ROLPAGO", "aplcobis": "N", "company": 500, "canal": "BCE", "numcta": null,
+      "accountingReturnCode": 0, "debitReturnCode": 0, "movementReturnCode": 0,
+      "smsServices": [{"code": "ROL-BCE", "name": "NOTIFICA ROLPAGO"}],
+      "expected": { "returnCode": 0, "oError": 0, "exit": "OK", "begins": 1, "commits": 1, "rollbacks": 0,
+                    "movementStatus": "P", "committed": ["sp_ndc_ahcc", "sp_grb_mov_y_frmpgo"], "cerror": false, "events": 0 }
+    },
+    {
+      "name": "RULE-035: no SMS row -> not configured: nothing sent, debit value kept",
+      "rules": ["RULE-035", "RULE-003"],
+      "accountType": 3, "service": "TRANSCLI", "aplcobis": "N", "company": 500,
+      "accountingReturnCode": 0, "debitReturnCode": 0, "movementReturnCode": 0,
+      "valorDebito": "100.50", "valorOrdenado": "100.00", "currentOwner": 700001,
+      "expected": { "returnCode": 0, "oError": 0, "exit": "OK", "begins": 1, "commits": 1, "rollbacks": 0,
+                    "movementStatus": "P", "committed": ["sp_ndc_ahcc", "sp_grb_mov_y_frmpgo"], "cerror": false,
+                    "events": 0, "basicNotifications": 0, "movementValor": "100.50", "priorRowCount": null }
+    },
+    {
+      "name": "RULE-005: basic virtual account (vi_prod_banc 13) on BNK -> 'AHO', channel IBK / 24OnLine",
+      "rules": ["RULE-005", "RULE-035", "RULE-009"],
+      "accountType": 12, "service": "ROLPAGO", "aplcobis": "N", "company": 500, "canal": "BNK",
+      "accountingReturnCode": 0, "debitReturnCode": 0, "movementReturnCode": 0,
+      "smsServices": [{"code": "ROL-IBK", "name": "NOTIFICA ROLPAGO"}], "virtualOwner": {"cliente": 700012, "prodBanc": 13},
+      "expected": { "returnCode": 0, "oError": 0, "exit": "OK", "begins": 1, "commits": 1, "rollbacks": 0,
+                    "movementStatus": "P", "committed": ["sp_vi_ndc_automatica", "sp_eventos", "sp_grb_mov_y_frmpgo"],
+                    "cerror": false, "events": 1,
+                    "event": {"canal": "IBK", "servicio": "ROL", "prodDeb": "AHO", "cliente": 700012, "descCanal": "24OnLine"} }
+    }
+  ]
+}

@@ -1,6 +1,7 @@
 package com.nexti.debcred;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 
 /**
  * Sybase text and number semantics the procedure relies on.
@@ -37,6 +38,45 @@ final class AseText {
     /** {@code convert(varchar, number)}: decimal text; NULL stays NULL. */
     static String toVarchar(Integer number) {
         return number == null ? null : Integer.toString(number);
+    }
+
+    /** {@code ltrim(rtrim(value))}; an all-blank result is NULL, as in ASE. */
+    static String trim(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = ltrim(rtrim(value));
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    /** {@code convert(char(width), text)}: cut or right-padded with blanks; NULL stays NULL. */
+    static String toChar(String value, int width) {
+        if (value == null) {
+            return null;
+        }
+        return value.length() >= width ? value.substring(0, width) : String.format("%-" + width + "s", value);
+    }
+
+    /** Assignment to a {@code varchar(width)} variable: longer text is cut; NULL stays NULL. */
+    static String varchar(String value, int width) {
+        return value == null || value.length() <= width ? value : value.substring(0, width);
+    }
+
+    /**
+     * {@code substring(value, start, length)} in ASE: NULL when the value is NULL, the length is not
+     * positive or the start is past the end.
+     */
+    static String substring(String value, int start, int length) {
+        if (value == null || length <= 0 || start > value.length()) {
+            return null;
+        }
+        int from = Math.max(start, 1) - 1;
+        return value.substring(from, Math.min(value.length(), start - 1 + length));
+    }
+
+    /** {@code convert(varchar(11), money)}: plain digits, two decimals rounded half up; NULL stays NULL. */
+    static String moneyToVarchar(BigDecimal value) {
+        return value == null ? null : value.setScale(2, RoundingMode.HALF_UP).toPlainString();
     }
 
     /** {@code isnull(value, 0)} for money. */

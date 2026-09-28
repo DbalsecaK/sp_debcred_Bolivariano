@@ -86,7 +86,7 @@ class JdbcAseSessionTest {
 
         CommissionResult result = new JdbcAseSession(connection, "cobis").charge(command(null));
 
-        verify(connection).prepareCall("{? = call cobis..sp_grb_comision(" + placeholders(42) + ")}");
+        verify(connection).prepareCall("{? = call cobis..sp_grb_comision(" + placeholders(41) + ")}");
         verify(call).registerOutParameter(1, Types.INTEGER);
         verify(call).registerOutParameter(36, Types.INTEGER);
         verify(call).setString(34, "sp_debito_empresa");        // @i_savepoint
@@ -105,7 +105,7 @@ class JdbcAseSessionTest {
 
         CommissionResult result = new JdbcAseSession(connection, "cobis").charge(command("16"));
 
-        verify(connection).prepareCall("{? = call cobis..sp_grb_comision(" + placeholders(38) + ")}");
+        verify(connection).prepareCall("{? = call cobis..sp_grb_comision(" + placeholders(37) + ")}");
         verify(call).setString(34, "16");                        // @i_tipoafec
         verify(call).setString(35, "sp_debito_empresa");         // @i_savepoint
         verify(call).setInt(36, 0);                              // @i_secuencial

@@ -23,6 +23,9 @@ server:
 
 # Sybase ASE with the COBIS procedures and tables. Values come from the environment; nothing here
 # is a credential. cobis-database: the home of the legacy's unqualified names (brief 7-A8).
+# URL template (review Phase 4 M4; to confirm on the bank's test ASE): the reads run inside
+# `begin tran`, so do not let jTDS create temporary procedures, and bind text as varchar like the legacy:
+#   jdbc:jtds:sybase://<host>:<port>/<db>;prepareSQL=0;sendStringParametersAsUnicode=false
 debcred:
   ase:
     url: ${DEBCRED_ASE_URL:}

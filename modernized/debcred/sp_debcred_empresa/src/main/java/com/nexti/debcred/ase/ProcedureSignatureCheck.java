@@ -17,8 +17,9 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 /**
- * Fails fast at startup when {@code sp_grb_comision} does not declare its parameters in the order the
- * positional call in {@link JdbcAseSession#charge} assumes (architecture review Phase 2 H1, Phase 1 M2).
+ * Fails fast at startup when {@code sp_grb_comision}, {@code pa_sat_pnotificacion} or {@code sp_eventos} does
+ * not declare its parameters in the order the positional calls in {@link JdbcAseSession} assume (architecture
+ * review Phase 2 H1, Phase 1 M2; the notifiers since Phase 4).
  * The legacy calls it by name; the procedure's source is not available (brief section 7, A5), so the
  * declaration order is an assumption until this check has passed once against the bank's ASE.
  */
@@ -39,6 +40,16 @@ class ProcedureSignatureCheck implements ApplicationRunner {
             "@i_valor_tarifa", "@i_valor_comision_cue", "@i_valor_tarifa_efe", "@i_valor_comision_efe",
             "@i_valor_tarifa_che", "@i_valor_comision_che");
 
+    /** The order {@code JdbcAseSession.notifyBasic} binds (1066-1082). */
+    static final List<String> PA_SAT_PNOTIFICACION = List.of("@i_canal", "@i_ctadebito", "@i_tipctadeb", "@i_servicio",
+            "@i_orden_banco", "@i_direccion_transf", "@i_secuencial", "@i_valor", "@i_nombrecred", "@i_comision",
+            "@i_ctacred", "@i_prod_cre", "@i_empresa", "@o_error", "@o_msg");
+
+    /** The order {@code JdbcAseSession.registerEvent} binds (1214-1242). */
+    static final List<String> SP_EVENTOS = List.of("@i_operacion", "@i_canal", "@i_servicio", "@i_producto", "@i_cuenta",
+            "@i_valor", "@i_cta_deb", "@i_prod_deb", "@i_cta_cre", "@i_prod_cre", "@i_cliente", "@i_costo", "@i_empresa",
+            "@i_desc_canal");
+
     private final DataSource aseDataSource;
     private final AseProperties ase;
 
@@ -50,7 +61,10 @@ class ProcedureSignatureCheck implements ApplicationRunner {
     @Override
     public void run(ApplicationArguments args) throws SQLException {
         try (Connection connection = aseDataSource.getConnection()) {
-            verify(connection.getMetaData(), ase.cobisDatabase(), "sp_grb_comision", SP_GRB_COMISION);
+            DatabaseMetaData meta = connection.getMetaData();
+            verify(meta, ase.cobisDatabase(), "sp_grb_comision", SP_GRB_COMISION);
+            verify(meta, ase.cobisDatabase(), "pa_sat_pnotificacion", PA_SAT_PNOTIFICACION);
+            verify(meta, "cob_internet", "sp_eventos", SP_EVENTOS);
         }
     }
 

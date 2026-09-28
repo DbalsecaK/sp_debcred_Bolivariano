@@ -100,7 +100,7 @@ Not applied, listed for later:
 
 1. ~~Phase 2 (commissions, B10-B11)~~: done, see "Phase 2" below.
 2. ~~Phase 3 (order header, B12)~~: done, see "Phase 3" below.
-3. **Phase 4 (notifications, B7):** replace the stub; `NotificationOutcome.configured = true` must overwrite the debit code (1248) and, for TRANSCLI/TARJCRED/COMEXT, the debit value (884-886).
+3. ~~Phase 4 (notifications, B7)~~: done, see "Phase 4" below.
 4. **Before any real ASE run:** confirm D1-7 (transaction mode), M2 (parameter order), and whether the COBIS callers open their own transaction (brief §7 A1, unanswered).
 5. `KNOWN_DIFFERENCES.md` (Phase 5): D1-2 and D1-3.
 
@@ -164,6 +164,82 @@ Brief Phase 3, entry criteria met (Phase 2 exit criteria; section 7 A5 assumed c
 | M2 | Empty IN list produced invalid SQL | Returns 0 without SQL; test |
 | M3 | `in (NULL)` depends on `ansinull` and column nullability | Documented on the adapter; **to confirm on the bank's ASE together with the DDL** |
 | L1-L4 | Enum for the table; SQLState in logs; `Integer codErrord`; `null` as a signal | SQLState/code now logged; the rest kept (the table is always a literal or a validated identifier; `codErrord` is 0 on this path; the contract pins the shapes) |
+
+## Phase 4: notifications (B7, legacy lines 746-1256), 2026-09-27
+
+Brief Phase 4, entry criteria met (Phase 3 exit criteria; section 7 A5 assumed catalogue columns). Plan approved at the gate by David Balseca with section 7 **A15** (the basic notifier's `@o_error` reaches the caller: parity), **A16** (lowest `ct_cod_catalogo` among several SMS rows) and **A17** (`@wRowdbBiz` from the live read only). At the test gate he also approved: exit C in COBIS mode keeps the notifier's `@o_error` (part of A15, parity), and fixing two adapter defects of Phases 1-3 (below). The Phase 1 stub is replaced by `CustomerNotifications`, wired in `DebitFlowConfiguration`.
+
+| Behavior | Legacy `sp_debcred_empresa.sp` | Target | Rules |
+|---|---|---|---|
+| Entry: debit returned 0, service not PAGOPRV; a NULL/blank service never enters | 746 | service `postDebitNote`; `CustomerNotifications.notify` step 0 (:47) | RULE-034 |
+| Channel `char(3)`: DIR/SAT -> SAT, BNK -> IBK '24OnLine', VEN 'Ventanilla' | 760-794 | `Channel.of` (:175-190) | RULE-035 |
+| SMS service: `ad_servicios_sms` LIKE + channel suffix, prefix before `-`; none -> not configured | 798-814 | `smsService` (:128), `NotificationCatalogReader.smsServiceCodes` | RULE-035, A16 |
+| TRANSWIFT: institution and credit account (30) from the detail, live then history; commission `@i_valor_comision` | 820-874 | `notify` (:62-71), `OrderDetailReader` | RULE-019, A17 |
+| TRANSCLI/TARJCRED/COMEXT: debit value := ordered value (flows to the movement); `ad_cuentas_bce` institution/account/type, live then history; the 882 result set not emitted | 878-932 | `notify` (:72-83) | RULE-003, RULE-004, RULE-011, A11, A17 |
+| Credit product 0/3/4/8/9 | 944-974 | `creditProduct` (:139) | RULE-004, RULE-005 |
+| Cost = commission + second SWIFT value; value/cost as `varchar(11)` | 980-986 | `notify` (:86-89), `AseText.moneyToVarchar` | RULE-006 |
+| Classification `ad_notificacion_basica`, default 'OTRO' | 994-1014 | `notify` (:91-96) | RULE-036 |
+| 'B': beneficiary live then history, `pa_sat_pnotificacion`, its `@o_error` kept | 1020-1082 | `notify` (:97-107), `BasicNotificationPort` | RULE-036, A15 |
+| 'OTRO': debtor product/client (VIR -> AHO for product 13), block list, BCE+ROLPAGO without account, `sp_eventos` | 1094-1242 | `debtor` (:153), `notify` (:108-118), `EventNotificationPort` | RULE-005, RULE-021, RULE-034 |
+| `@w_cod_errord = @w_return`: a notifier failure reverses the debit (exit A) | 1248 | `NotificationOutcome`, service B7/B9 | RULE-034, RULE-012 |
+| What B7 leaves behind: `@o_error` on success (`isnull`, 2134) and on exit C COBIS mode (2150-2158); `@wRowdbBiz` for B12, reassigned by the SPI-return live read (1358) | 256, 840, 912, 1358, 2134, 2150-2158 | `DebitCompanyAccountService` (`Posted.oError/wRowdbBiz`, `errorExit`) | A15, A17, RULE-010 |
+| Adapters: 6 catalogue/detail reads, 3 account-master reads, 2 notifier calls, startup signature check of both notifiers | (same) | `ase/JdbcAseSession`, `ase/ProcedureSignatureCheck`, `localpg/PgAseSession` | brief section 7 A5, A8 |
+
+**Adapter defects of Phases 1-3 fixed (approved):** (1) `JdbcAseSession.call` wrote one `?` more than it bound on every procedure call (jTDS would refuse it); the Phase 2 pins changed from 42/38 to 41/37 placeholders. (2) The NDCORPEI lookup used columns that do not exist (`tb_tabla`, `ct_tabla`, `tb_codigo`, `ct_estado`); it now uses the legacy's `tb_nom_tabla`, `ct_cod_tabla`, `tb_cod_tabla`, `ct_est_catalogo` and `isnull(ct_otro_campo_catalogo, '')` (JDBC, local PostgreSQL and its schema).
+
+**Not migrated:** the stray result set `select @i_comision, @i_valor_ordenado` (882): approved known difference (A11, RULE-011), goes to `KNOWN_DIFFERENCES.md` in Phase 5.
+
+**Deliberate deviations:** none that change a business outcome. For a multi-row scalar read (the interbank and beneficiary detail by order only, the classification) the legacy keeps an undefined row; the service takes the first row the database returns, and every field of one read comes from the same row. **Open for a decision** (review M2), not pinned.
+
+**Proof:** **498 tests, 0 failures, 0 skipped** (`mvn -o test` from clean): Phases 1-3's 286 (one-line change only in the two placeholder pins above), 209 Phase 4 characterization tests (channel and SMS service, TRANSWIFT, interbank, cost and texts, basic notification + A15, event + block list, notifier failure reversing the debit on committed state, `@wRowdbBiz`/122004, walkthroughs 1-4 end to end, production wiring, JDBC adapter) and 3 adapter tests from the review. **`equivalence cases executed: 56 of 56`** (15 new golden cases). Equivalence is spec-based: the legacy was not executable here (no ASE); ceiling PARTLY PROVEN. **Canaries** (XML under `analysis/debcred/equivalence/canary/sp_debcred_empresa/`):
+
+- `Canary: highest SMS code instead of the lowest (A16) -> 2 tests failed`
+- `Canary: sp_eventos return status ignored (line 1248) -> 10 tests failed`
+- `Canary: @wRowdbBiz counted after the history fallback (A17) -> 12 tests failed`
+- `Canary: a notifier raiserror thrown instead of carried on (review H1) -> 2 tests failed`
+
+**Local PostgreSQL environment:** schema extended (catalogue with the legacy columns, order detail live/history/home database, account masters, the two notifiers simulated). Verified over HTTP on localhost: TRANSCLI happy path (`{0, 0}`, `sp_eventos` with value "12.10", cost "0.00", SMS service TRC, channel SAT, CTE -> AHO; header I -> T) and `sp_eventos` failing with 30001 (`{30001, 30001}`, debit and event rolled back to the savepoint, movement 'X' committed, header stays I). The service was stopped afterwards.
+
+**Architecture review (Phase 4):**
+
+| # | Finding | Change |
+|---|---|---|
+| H1 | COBIS notifiers report a failure with `raiserror` + return code and the legacy carries on (1248 -> exit A); jTDS turns the raiserror into an `SQLException`, so the approved reversal would surface as HTTP 502 with no 'X' movement | `JdbcAseSession.callCarryingOn` for the two notifiers: a raised error answers the return status (else the ASE error number, else -1) and exit A runs; a lost transaction (1205/08xxx) still throws. 3 adapter tests + canary. **To confirm on the bank's test ASE.** The same convention affects the Phase 1-3 procedure calls: follow-up below. |
+| M1 | A NULL `@i_valor_ordenado` on TRANSCLI/TARJCRED/COMEXT replaces the debit value with NULL in the legacy; `NotificationOutcome.valorDebito` uses null for "no replacement" | Open (contract open question); needs an outcome flag. Listed for the verify/Phase 5 pass. |
+| M2 | Multi-row scalar reads: ASE usually keeps the last row scanned, the service the first | Open for a decision (see above). |
+| M3 | `convert(varchar(11), money)` for 100,000,000.00 or more | Open; ASE behavior to confirm (error vs truncation). |
+| M4 | jTDS URL settings inside `begin tran` (`prepareSQL`, `sendStringParametersAsUnicode`) | URL template documented in `application.yml`; to confirm on the bank's test ASE with `ansinull`. |
+| M5 | A notifier failure looks like a debit failure in the logs | WARN log in `CustomerNotifications` (no behavior change). |
+| L1-L5 | Named parameters instead of positional + signature check (and `sp_cerror` called positionally); five ports -> fewer; unused `NotificationContext` fields and the test-only constructor; adapter tests check text, not driver behavior; boxed constant | Kept; L1 and L4 go to the ASE checklist: the first run on the bank's test ASE is the real acceptance test of every `JdbcAseSession` method. |
+
+**Follow-ups:**
+1. **Bank's test ASE:** confirm H1 (the COBIS `raiserror` convention; if confirmed, apply `callCarryingOn` to `sp_ndc_ahcc`, `sp_vi_ndc_automatica`, `sp_grb_mov_y_frmpgo`, `sp_grb_comision` so exits A and B also survive jTDS), M3, M4, L1 (`sp_cerror` parameter order), together with D1-7 and M2 of Phase 1.
+2. **Decisions:** M2 (which row of a multi-row read), M1 (NULL ordered value).
+3. **Phase 5 / `KNOWN_DIFFERENCES.md`:** the 882 result set (A11), `@o_reg_a_proc` NULL, D1-2 and D1-3.
+
+## Side by side: notification channel, legacy 760-794 vs `CustomerNotifications.Channel.of`
+
+Generated from the sources (`diff -y --width=160`); the legacy range holds no credential.
+
+```
+              select @w_canal_sms = @i_canal                                  |         static Channel of(String canal) {
+        if @w_canal_sms in ('DIR', 'SAT')                                     |             String code = AseText.toChar(canal, 3);
+        begin                                                                 |             if (AseText.equalsIgnoringTrailingBlanks(code, "DIR") || AseText.
+       select @w_canal_sms = 'SAT'                                            |                 return new Channel("SAT", "SAT");
+             select @w_desc_canal = 'SAT'                                     |             }
+        end                                                                   |             if (AseText.equalsIgnoringTrailingBlanks(code, "BNK")) {
+        else                                                                  |                 return new Channel("IBK", "24OnLine");
+        if @w_canal_sms = 'BNK'                                               |             }
+        begin                                                                 |             if (AseText.equalsIgnoringTrailingBlanks(code, "VEN")) {
+          select @w_canal_sms = 'IBK'                                         |                 return new Channel(code, "Ventanilla");
+          select @w_desc_canal = '24OnLine'                                   |             }
+        end                                                                   |             return new Channel(code, null);
+        else                                                                  |         }
+        if @w_canal_sms = 'VEN'                                               <
+        begin                                                                 <
+          select @w_desc_canal = 'Ventanilla'                                 <
+        end                                                                   <
+```
 
 ## Local PostgreSQL test environment (profile `local-pg`), 2026-09-27
 

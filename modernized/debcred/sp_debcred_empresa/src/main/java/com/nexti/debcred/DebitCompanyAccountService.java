@@ -2,11 +2,12 @@ package com.nexti.debcred;
 
 import java.math.BigDecimal;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * The company-account debit for a payment order, formerly {@code dbo.sp_debcred_empresa}
- * (sp_debcred_empresa.sp). Phase 1: blocks B0-B6, B8, B9, B14 and B15; notifications (B7),
- * commissions (B10-B11) and the order-header update (B12) are steps that later phases fill in.
+ * (sp_debcred_empresa.sp). Blocks B0-B6, B8, B9, B14 and B15 here; notifications (B7, Phase 4),
+ * commissions (B10-B11, Phase 2) and the order-header update (B12, Phase 3) are steps.
  *
  * <p>Business logic is preserved as-is (INTENT.md, 2026-09-27), including the behaviors the
  * assessment flagged and the approver confirmed: a notification failure reverses the debit
@@ -122,10 +123,10 @@ public class DebitCompanyAccountService {
         try {
             accounting = accountingConfiguration.resolve(accountingQuery(request, moneda, conceptoBas));   // RULE-007, RULE-030
         } catch (AsePortException failure) {
-            return errorExit(request, NO_ACCOUNTING_CONFIGURATION, false);                     // @@error <> 0 (382)
+            return errorExit(request, NO_ACCOUNTING_CONFIGURATION, false, 0);                  // @@error <> 0 (382)
         }
         if (accounting.returnCode() > 0) {
-            return errorExit(request, NO_ACCOUNTING_CONFIGURATION, false);
+            return errorExit(request, NO_ACCOUNTING_CONFIGURATION, false, 0);
         }
         Integer trn = accounting.trn();
         String causal = accounting.causal();
@@ -137,7 +138,7 @@ public class DebitCompanyAccountService {
         // B5, B6, B8 (414-740, 1260-1322)
         Posting posting = post(request, sSsn, terminal, moneda, trn, causal, batch, commissions);
         if (posting instanceof Posting.Aborted aborted) {
-            return errorExit(request, aborted.numError(), true);
+            return errorExit(request, aborted.numError(), true, 0);
         }
         Posting.Posted posted = (Posting.Posted) posting;
 
@@ -149,20 +150,22 @@ public class DebitCompanyAccountService {
         }
         String servicio = request.iServicio();
         String actTotord = "S";
+        Integer wRowdbBiz = posted.wRowdbBiz();                                                   // 840/912 (A17)
         if (isSpiReturn(request)) {                                                               // RULE-023, RULE-024
-            servicio = orders.liveService(request.iOrden())
-                    .or(() -> orders.historyService(request.iOrden()))
-                    .orElse(null);
+            Optional<String> live = orders.liveService(request.iOrden());
+            wRowdbBiz = live.isPresent() ? 1 : 0;                                                 // 1358: the live read only
+            servicio = live.or(() -> orders.historyService(request.iOrden())).orElse(null);
             actTotord = "N";
         }
+        Integer oError = posted.oError();                                                         // @o_error after B7 (A15)
         MovementResult recorded;
         try {
             recorded = movement.record(movementCommand(request, terminal, posted, stsProc, servicio, commissions));  // RULE-015
         } catch (AsePortException failure) {
-            return errorExit(request, MOVEMENT_NOT_RECORDED, true);                            // @@error <> 0 (1464)
+            return errorExit(request, MOVEMENT_NOT_RECORDED, true, oError);                    // @@error <> 0 (1464)
         }
         if (recorded.returnCode() != 0) {
-            return errorExit(request, MOVEMENT_NOT_RECORDED, true);
+            return errorExit(request, MOVEMENT_NOT_RECORDED, true, oError);
         }
         if (posted.codErrord() != 0) {                                                            // exit A (1480-1492)
             tx.commit();
@@ -175,19 +178,17 @@ public class DebitCompanyAccountService {
                 posted.tranNcnd(), posted.cadena(), servicio, terminal, sSsn));
         return switch (outcome) {
             case CommissionOutcome.ExitB b -> new DebitResult(b.oError(), b.oError(), null);       // 1698-1700, no commit
-            case CommissionOutcome.LblError e -> errorExit(request, e.numError(), true);          // 1834
+            case CommissionOutcome.LblError e -> errorExit(request, e.numError(), true, oError);  // 1834
             case CommissionOutcome.Continue c -> {
                 // B12 (1862-2090): 122004 goes to lbl_error; otherwise success (2130-2136).
-                // priorRowCount is @wRowdbBiz as B12 finds it, NOT "the last @@rowcount". TODO Phase 4: set it
-                // exactly where the legacy does: 824/840 and 890/912 (B7 reads), 1358 (SPI-return lookup, only
-                // when actTotord is already 'N'). Until then it is the declared NULL (line 140).
+                // priorRowCount is @wRowdbBiz as B12 finds it (840/912 in B7, 1358), not "the last @@rowcount".
                 int numError = orderHeader.update(new OrderHeaderContext(request, servicio, frmPagcobDeb, actTotord,
-                        posted.codErrord(), null));
+                        posted.codErrord(), wRowdbBiz));
                 if (numError != 0) {
-                    yield errorExit(request, numError, true);
+                    yield errorExit(request, numError, true, oError);
                 }
                 tx.commit();
-                yield new DebitResult(0, 0, null);
+                yield new DebitResult(0, oError == null ? 0 : oError, null);                     // 2134: isnull(@o_error, 0)
             }
         };
     }
@@ -221,13 +222,13 @@ public class DebitCompanyAccountService {
                          Boolean batch, CommissionBreakdown commissions) {
         Integer type = r.iTipctaEmp();
         if (type == null) {
-            return new Posting.Posted(UNSUPPORTED_ACCOUNT_TYPE, null, r.iValorDebito(), trn, causal, null);   // 1316
+            return Posting.Posted.withoutNotification(UNSUPPORTED_ACCOUNT_TYPE, null, r.iValorDebito(), trn, causal, null); // 1316
         }
         return switch (type) {
             case CURRENT_ACCOUNT, SAVINGS_ACCOUNT, VIRTUAL_ACCOUNT ->
                     postDebitNote(r, sSsn, terminal, moneda, trn, causal, batch, commissions);
             case ACCOUNTING_ACCOUNT -> postLedgerDebit(r, terminal, trn, causal);
-            default -> new Posting.Posted(UNSUPPORTED_ACCOUNT_TYPE, null, r.iValorDebito(), trn, causal, null);
+            default -> Posting.Posted.withoutNotification(UNSUPPORTED_ACCOUNT_TYPE, null, r.iValorDebito(), trn, causal, null);
         };
     }
 
@@ -276,8 +277,10 @@ public class DebitCompanyAccountService {
             tranNcnd = result.transaccion();
         }
 
-        // B7 (746-1256): notifications, a step of Phase 4; its outcome overwrites the debit result (1248)
+        // B7 (746-1256): notifications; a configured outcome overwrites the debit result (1248)
         BigDecimal valorDebito = r.iValorDebito();
+        Integer oError = 0;
+        Integer wRowdbBiz = null;
         if (codErrord == 0 && !AseText.trimmedEquals(r.iServicio(), "PAGOPRV")) {
             NotificationOutcome outcome = notification.notify(new NotificationContext(r, r.iServicio(), trn, causal,
                     valorDebito, commissions.comision(), commissions.valorComision(), tranNcnd));
@@ -286,9 +289,11 @@ public class DebitCompanyAccountService {
                 if (outcome.valorDebito() != null) {
                     valorDebito = outcome.valorDebito();                                          // RULE-003
                 }
+                oError = outcome.oError();                                                        // A15
+                wRowdbBiz = outcome.wRowdbBiz();                                                  // A17
             }
         }
-        return new Posting.Posted(codErrord, tranNcnd, valorDebito, trn, causal, cadena);
+        return new Posting.Posted(codErrord, tranNcnd, valorDebito, trn, causal, cadena, oError, wRowdbBiz);
     }
 
     /** Block B8 (1260-1300): an accounting account; company 1295 on SPI books the amount as balance. RULE-022. */
@@ -305,7 +310,7 @@ public class DebitCompanyAccountService {
         LedgerDebitResult result = ledgerDebit.debit(new LedgerDebitCommand(
                 r.sSrv(), r.sOfi(), null, r.sUser(), terminal, trn, r.iFechaProceso(), r.iRefProv(), r.iNumctaEmp(),
                 r.sOfi(), 1, r.iMonDebito(), causal, saldo, valor, 0, empresa, r.iOrden(), 0));
-        return new Posting.Posted(result.returnCode(), null, valorDebito, trn, causal, null);
+        return Posting.Posted.withoutNotification(result.returnCode(), null, valorDebito, trn, causal, null);
     }
 
     /** {@code WRITELOG}-equivalent movement record (1394-1460). */
@@ -321,16 +326,17 @@ public class DebitCompanyAccountService {
 
     /**
      * {@code lbl_error} (2140-2170). RULE-028: with {@code @i_aplcobis = 'S'} the code is the return
-     * value, {@code sp_cerror} is called and {@code @o_error} keeps the 0 set at line 256; otherwise the
-     * return value is 0 and {@code @o_error} carries the code.
+     * value, {@code sp_cerror} is called and {@code @o_error} is left as it is ({@code oError}: the 0 of
+     * line 256, or the basic notifier's output after B7, brief section 7 A15); otherwise the return value
+     * is 0 and {@code @o_error} carries the code.
      */
-    private DebitResult errorExit(DebitRequest r, int numError, boolean transactionOpen) {
+    private DebitResult errorExit(DebitRequest r, int numError, boolean transactionOpen, Integer oError) {
         if (transactionOpen) {
             tx.rollback();
         }
         if (AseText.equalsIgnoringTrailingBlanks(r.iAplcobis(), "S")) {
             errorReporting.report(new ErrorReport(r.iSpName(), numError));
-            return new DebitResult(numError, 0, null);
+            return new DebitResult(numError, oError, null);
         }
         return new DebitResult(0, numError, null);
     }
@@ -338,9 +344,17 @@ public class DebitCompanyAccountService {
     /** What blocks B5-B8 leave for B9. */
     private sealed interface Posting {
 
-        /** The debit ran (or was refused with 122001): its code, sequence and the working values B9-B11 need ({@code cadena} = {@code @w_cadena}). */
-        record Posted(int codErrord, Integer tranNcnd, BigDecimal valorDebito, Integer trn, String causal, String cadena)
-                implements Posting {
+        /**
+         * The debit ran (or was refused with 122001): its code, sequence and the working values B9-B12 need
+         * ({@code cadena} = {@code @w_cadena}; {@code oError} and {@code wRowdbBiz} as B7 left them).
+         */
+        record Posted(int codErrord, Integer tranNcnd, BigDecimal valorDebito, Integer trn, String causal, String cadena,
+                      Integer oError, Integer wRowdbBiz) implements Posting {
+
+            static Posted withoutNotification(int codErrord, Integer tranNcnd, BigDecimal valorDebito, Integer trn,
+                                              String causal, String cadena) {
+                return new Posted(codErrord, tranNcnd, valorDebito, trn, causal, cadena, 0, null);
+            }
         }
 
         /** {@code goto lbl_error} from inside the transaction (line 542). */

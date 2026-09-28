@@ -9,8 +9,10 @@ import java.sql.Statement;
 import java.sql.Timestamp;
 import java.sql.Types;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.IntFunction;
 import java.util.regex.Pattern;
 
 import org.slf4j.Logger;
@@ -21,6 +23,9 @@ import com.nexti.debcred.AccountingConfigurationQuery;
 import com.nexti.debcred.AsePortException;
 import com.nexti.debcred.AseSession;
 import com.nexti.debcred.AseTransactionAbortedException;
+import com.nexti.debcred.BasicNotificationCommand;
+import com.nexti.debcred.BasicNotificationResult;
+import com.nexti.debcred.BeneficiaryDetail;
 import com.nexti.debcred.CommissionCommand;
 import com.nexti.debcred.CommissionResult;
 import com.nexti.debcred.CommissionTariffQuery;
@@ -28,10 +33,15 @@ import com.nexti.debcred.CommissionTariffResult;
 import com.nexti.debcred.DebitNoteCommand;
 import com.nexti.debcred.DebitNoteResult;
 import com.nexti.debcred.ErrorReport;
+import com.nexti.debcred.EventCommand;
+import com.nexti.debcred.EventResult;
+import com.nexti.debcred.InterbankCreditDetail;
 import com.nexti.debcred.LedgerDebitCommand;
 import com.nexti.debcred.LedgerDebitResult;
 import com.nexti.debcred.MovementCommand;
 import com.nexti.debcred.MovementResult;
+import com.nexti.debcred.SwiftCreditDetail;
+import com.nexti.debcred.VirtualAccountOwner;
 import com.nexti.debcred.VirtualDebitNoteCommand;
 import com.nexti.debcred.VirtualDebitNoteResult;
 
@@ -394,13 +404,14 @@ public final class JdbcAseSession implements AseSession {
     @Override
     public Optional<String> ndcorpeiConcept() {
         // 484-496: ct_cod_catalogo of the active ad_concepto_contable row whose other field is NDCORPEI
+        // (Phase 4 fix: the legacy catalogue column names)
         return queryString("""
                 select c.ct_cod_catalogo
                   from db_biz_admempresa..ba_tabla t, db_biz_admempresa..ba_catalogo c
-                 where t.tb_tabla = 'ad_concepto_contable'
-                   and c.ct_tabla = t.tb_codigo
-                   and c.ct_otro_campo_catalogo = 'NDCORPEI'
-                   and c.ct_estado = 'A'""", "ba_catalogo:NDCORPEI", ps -> { });
+                 where t.tb_cod_tabla = c.ct_cod_tabla
+                   and t.tb_nom_tabla = 'ad_concepto_contable'
+                   and isnull(c.ct_otro_campo_catalogo, '') = 'NDCORPEI'
+                   and c.ct_est_catalogo = 'A'""", "ba_catalogo:NDCORPEI", ps -> { });
     }
 
     @Override
@@ -420,6 +431,184 @@ public final class JdbcAseSession implements AseSession {
     public Optional<String> historyService(Integer ordenBanco) {
         return queryString("select or_servicio from db_sat_his..bp_orden_his where or_orden_banco = ?",
                 "bp_orden_his", ps -> ps.setObject(1, ordenBanco, Types.INTEGER));
+    }
+
+    // ---- notifications (B7) ----------------------------------------------------------------------
+
+    @Override
+    public List<String> smsServiceCodes(String servicio, String canalSms) {
+        // 798-810: no tb_est_tabla filter; % and _ in the service stay wildcards, as in the legacy LIKE
+        return queryRows("""
+                select c.ct_cod_catalogo
+                  from db_biz_admempresa..ba_tabla t, db_biz_admempresa..ba_catalogo c
+                 where t.tb_cod_tabla = c.ct_cod_tabla
+                   and t.tb_nom_tabla = 'ad_servicios_sms'
+                   and c.ct_nom_catalogo like '%' + ltrim(rtrim(?)) + '%'
+                   and right(ltrim(rtrim(c.ct_cod_catalogo)), 3) = ?
+                   and c.ct_est_catalogo = 'A'
+                 order by c.ct_cod_catalogo""", "ad_servicios_sms", ps -> {
+            ps.setString(1, servicio);
+            ps.setString(2, canalSms);
+        }, rs -> rs.getString(1));
+    }
+
+    @Override
+    public Optional<String> notificationClass(String servicio) {
+        // 998-1010
+        return queryString("""
+                select c.ct_otro_campo_catalogo
+                  from db_biz_admempresa..ba_tabla t, db_biz_admempresa..ba_catalogo c
+                 where t.tb_nom_tabla = 'ad_notificacion_basica'
+                   and t.tb_cod_tabla = c.ct_cod_tabla
+                   and c.ct_cod_catalogo = ?
+                   and t.tb_est_tabla = 'A'
+                   and c.ct_est_catalogo = 'A'""", "ad_notificacion_basica", ps -> ps.setString(1, servicio));
+    }
+
+    @Override
+    public boolean notificationBlocked(String servicio, String servicioSms, String spName) {
+        // 1166-1180: no tb_est_tabla filter
+        return queryString("""
+                select '1'
+                  from db_biz_admempresa..ba_tabla t, db_biz_admempresa..ba_catalogo c
+                 where t.tb_cod_tabla = c.ct_cod_tabla
+                   and t.tb_nom_tabla = 'ba_bloqueaNotificacionSAT'
+                   and isnull(c.ct_nom_catalogo, '') = rtrim(?) + '-' + rtrim(?)
+                   and isnull(c.ct_otro_campo_catalogo, '') = rtrim(?)
+                   and c.ct_est_catalogo = 'A'""", "ba_bloqueaNotificacionSAT", ps -> {
+            ps.setString(1, servicio);
+            ps.setString(2, servicioSms);
+            ps.setString(3, spName);
+        }).isPresent();
+    }
+
+    @Override
+    public List<SwiftCreditDetail> liveSwiftCreditDetails(Integer ordenBanco, Integer secuencial, Integer ordenante) {
+        return swiftCreditDetails("db_biz_pagos..bp_orden", "db_biz_pagos..bp_detalle", ordenBanco, secuencial, ordenante);
+    }
+
+    @Override
+    public List<SwiftCreditDetail> historySwiftCreditDetails(Integer ordenBanco, Integer secuencial, Integer ordenante) {
+        return swiftCreditDetails("db_sat_his..bp_orden_his", "db_sat_his..bp_detalle_his", ordenBanco, secuencial,
+                ordenante);
+    }
+
+    /** 826-838 / 844-856. {@code orders} and {@code details} are literals. */
+    private List<SwiftCreditDetail> swiftCreditDetails(String orders, String details, Integer ordenBanco,
+                                                       Integer secuencial, Integer ordenante) {
+        return queryRows("select dt_referencia_grupo, dt_nom_cuenta from " + orders + ", " + details
+                + " where or_orden_banco = ? and or_orden_banco = dt_orden_banco and dt_secuencial = ?"
+                + " and or_ordenante = ?", details, ps -> {
+                    ps.setObject(1, ordenBanco, Types.INTEGER);
+                    ps.setObject(2, secuencial, Types.INTEGER);
+                    ps.setObject(3, ordenante, Types.INTEGER);
+                }, rs -> new SwiftCreditDetail(rs.getString("dt_referencia_grupo"), rs.getString("dt_nom_cuenta")));
+    }
+
+    @Override
+    public List<InterbankCreditDetail> liveInterbankCreditDetails(Integer ordenBanco) {
+        return interbankCreditDetails("db_biz_pagos..bp_detalle", ordenBanco);
+    }
+
+    @Override
+    public List<InterbankCreditDetail> historyInterbankCreditDetails(Integer ordenBanco) {
+        return interbankCreditDetails("db_sat_his..bp_detalle_his", ordenBanco);
+    }
+
+    /** 892-910 / 916-932. {@code details} is a literal. */
+    private List<InterbankCreditDetail> interbankCreditDetails(String details, Integer ordenBanco) {
+        return queryRows("select c.ct_nom_catalogo, dt_tipo_cta, dt_numero_cuenta"
+                + " from " + details + ", db_biz_admempresa..ba_tabla t, db_biz_admempresa..ba_catalogo c"
+                + " where dt_orden_banco = ? and dt_referencia_grupo = substring(c.ct_nom_catalogo, 1, 9)"
+                + " and t.tb_nom_tabla = 'ad_cuentas_bce' and t.tb_est_tabla = 'A'"
+                + " and t.tb_cod_tabla = c.ct_cod_tabla and c.ct_est_catalogo = 'A'", details,
+                ps -> ps.setObject(1, ordenBanco, Types.INTEGER),
+                rs -> new InterbankCreditDetail(rs.getString("ct_nom_catalogo"), integer(rs, "dt_tipo_cta"),
+                        rs.getString("dt_numero_cuenta")));
+    }
+
+    @Override
+    public List<BeneficiaryDetail> liveBeneficiaryDetails(Integer ordenBanco) {
+        return beneficiaryDetails(cobis + "..bp_detalle", ordenBanco);           // unqualified in the legacy (A8)
+    }
+
+    @Override
+    public List<BeneficiaryDetail> historyBeneficiaryDetails(Integer ordenBanco) {
+        return beneficiaryDetails("db_sat_his..bp_detalle_his", ordenBanco);
+    }
+
+    /** 1024-1044. {@code details} is a literal or the validated home database plus a literal. */
+    private List<BeneficiaryDetail> beneficiaryDetails(String details, Integer ordenBanco) {
+        return queryRows("select dt_nombre_beneficiario, dt_referencia_grupo from " + details
+                + " where dt_orden_banco = ?", details, ps -> ps.setObject(1, ordenBanco, Types.INTEGER),
+                rs -> new BeneficiaryDetail(rs.getString("dt_nombre_beneficiario"), rs.getString("dt_referencia_grupo")));
+    }
+
+    @Override
+    public Optional<Integer> currentAccountClient(String ctaBanco) {
+        return firstRow(queryRows("select cc_cliente from cob_cuentas..cc_ctacte where cc_cta_banco = ?", "cc_ctacte",
+                ps -> ps.setString(1, ctaBanco), rs -> integer(rs, "cc_cliente")));
+    }
+
+    @Override
+    public Optional<Integer> savingsAccountClient(String ctaBanco) {
+        return firstRow(queryRows("select ah_cliente from cob_ahorros..ah_cuenta where ah_cta_banco = ?", "ah_cuenta",
+                ps -> ps.setString(1, ctaBanco), rs -> integer(rs, "ah_cliente")));
+    }
+
+    @Override
+    public Optional<VirtualAccountOwner> virtualAccountOwner(String ctaBanco) {
+        List<VirtualAccountOwner> rows = queryRows(
+                "select vi_cliente, vi_prod_banc from cob_virtuales..vi_cuenta where vi_cta_banco = ?", "vi_cuenta",
+                ps -> ps.setString(1, ctaBanco),
+                rs -> new VirtualAccountOwner(integer(rs, "vi_cliente"), integer(rs, "vi_prod_banc")));
+        return rows.isEmpty() ? Optional.empty() : Optional.of(rows.get(0));
+    }
+
+    @Override
+    public BasicNotificationResult notifyBasic(BasicNotificationCommand c) {
+        // 1066-1082, positional in the order ProcedureSignatureCheck verifies; @o_error goes in as the
+        // caller's @o_error, which is 0 at that point (line 256)
+        return callCarryingOn(cobis + "..pa_sat_pnotificacion", 16, cs -> {
+            cs.setString(2, c.iCanal());
+            cs.setString(3, c.iCtadebito());
+            cs.setObject(4, c.iTipctadeb(), Types.SMALLINT);
+            cs.setString(5, c.iServicio());
+            cs.setObject(6, c.iOrdenBanco(), Types.INTEGER);
+            cs.setString(7, c.iDireccionTransf());
+            cs.setObject(8, c.iSecuencial(), Types.INTEGER);
+            cs.setBigDecimal(9, c.iValor());
+            cs.setString(10, c.iNombrecred());
+            cs.setBigDecimal(11, c.iComision());
+            cs.setString(12, c.iCtacred());
+            cs.setString(13, c.iProdCre());
+            cs.setString(14, c.iEmpresa());
+            cs.setInt(15, 0);
+            cs.registerOutParameter(15, Types.INTEGER);       // @o_error
+            cs.registerOutParameter(16, Types.VARCHAR);       // @o_msg
+        }, cs -> new BasicNotificationResult(cs.getInt(1), (Integer) cs.getObject(15), cs.getString(16)),
+                status -> new BasicNotificationResult(status, 0, null));
+    }
+
+    @Override
+    public EventResult registerEvent(EventCommand c) {
+        // 1214-1242, positional in the order ProcedureSignatureCheck verifies
+        return callCarryingOn("cob_internet..sp_eventos", 15, cs -> {
+            cs.setString(2, c.iOperacion());
+            cs.setString(3, c.iCanal());
+            cs.setString(4, c.iServicio());
+            cs.setObject(5, c.iProducto(), Types.SMALLINT);
+            cs.setString(6, c.iCuenta());
+            cs.setString(7, c.iValor());
+            cs.setString(8, c.iCtaDeb());
+            cs.setString(9, c.iProdDeb());
+            cs.setString(10, c.iCtaCre());
+            cs.setString(11, c.iProdCre());
+            cs.setObject(12, c.iCliente(), Types.INTEGER);
+            cs.setString(13, c.iCosto());
+            cs.setString(14, c.iEmpresa());
+            cs.setString(15, c.iDescCanal());
+        }, cs -> new EventResult(cs.getInt(1)), EventResult::new);
     }
 
     // ---- order header (B12) ----------------------------------------------------------------------
@@ -481,13 +670,14 @@ public final class JdbcAseSession implements AseSession {
     }
 
     /**
-     * {@code {? = call proc(?, ...)}} with {@code lastParameter} placeholders after the return value.
-     * Result sets the procedure emits ({@code select}, {@code print}) are drained first: jTDS refuses to
-     * read output parameters while one is pending.
+     * {@code {? = call proc(?, ...)}}: index 1 is the return value, the procedure's parameters are indices
+     * 2..{@code lastParameter}, so exactly {@code lastParameter - 1} placeholders go inside the parentheses
+     * (Phase 4 fix: one more was emitted and never bound). Result sets the procedure emits ({@code select},
+     * {@code print}) are drained first: jTDS refuses to read output parameters while one is pending.
      */
     private <T> T call(String procedure, int lastParameter, Binder<CallableStatement> bind, Reader<T> read) {
         lastStatement = procedure;
-        String placeholders = "?, ".repeat(lastParameter - 1) + "?";
+        String placeholders = "?, ".repeat(lastParameter - 2) + "?";
         try (CallableStatement cs = connection.prepareCall("{? = call " + procedure + "(" + placeholders + ")}")) {
             cs.registerOutParameter(1, Types.INTEGER);
             bind.bind(cs);
@@ -496,6 +686,53 @@ public final class JdbcAseSession implements AseSession {
             return read.read(cs);
         } catch (SQLException e) {
             throw failure(procedure, e);
+        }
+    }
+
+    /**
+     * A notifier the legacy calls as {@code exec @w_return = proc} and then carries on (lines 1066 and 1212,
+     * 1248). COBIS procedures report a failure with {@code raiserror} (via {@code sp_cerror}) plus a return
+     * code; T-SQL does not stop the caller, but jTDS turns the raised error into an {@link SQLException}.
+     * So a raised error answers {@code failed(status)}: the procedure's return status when jTDS has it,
+     * else the ASE error number, else -1; the flow then takes exit A as the legacy does (RULE-034,
+     * RULE-012; architecture review Phase 4 H1). A lost transaction (1205, 08xxx) still ends the debit.
+     * <b>To confirm on the bank's test ASE</b> together with the COBIS error convention.
+     */
+    private <T> T callCarryingOn(String procedure, int lastParameter, Binder<CallableStatement> bind, Reader<T> read,
+                                 IntFunction<T> failed) {
+        lastStatement = procedure;
+        String placeholders = "?, ".repeat(lastParameter - 2) + "?";
+        try (CallableStatement cs = connection.prepareCall("{? = call " + procedure + "(" + placeholders + ")}")) {
+            cs.registerOutParameter(1, Types.INTEGER);
+            bind.bind(cs);
+            try {
+                cs.execute();
+                drain(cs);
+            } catch (SQLException raised) {
+                AsePortException failure = failure(procedure, raised);
+                if (failure instanceof AseTransactionAbortedException) {
+                    throw failure;
+                }
+                int status = returnStatus(cs);
+                if (status == 0) {
+                    status = raised.getErrorCode() != 0 ? raised.getErrorCode() : -1;
+                }
+                log.warn("{} raised an error (SQLState {}, code {}): the caller carries on with status {}",
+                        procedure, raised.getSQLState(), raised.getErrorCode(), status);
+                return failed.apply(status);
+            }
+            return read.read(cs);
+        } catch (SQLException e) {
+            throw failure(procedure, e);
+        }
+    }
+
+    /** The return status jTDS already read, or 0 when it is not available. */
+    private static int returnStatus(CallableStatement cs) {
+        try {
+            return cs.getInt(1);
+        } catch (SQLException notAvailable) {
+            return 0;
         }
     }
 
@@ -517,6 +754,38 @@ public final class JdbcAseSession implements AseSession {
         } catch (SQLException e) {
             throw failure("query on " + what, e);
         }
+    }
+
+    private interface RowMapper<T> {
+        T map(ResultSet row) throws SQLException;
+    }
+
+    /** Every row the query returns, in order: the list size is the legacy's {@code @@rowcount}. */
+    private <T> List<T> queryRows(String sql, String what, Binder<PreparedStatement> bind, RowMapper<T> map) {
+        lastStatement = what;
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            bind.bind(ps);
+            try (ResultSet rs = ps.executeQuery()) {
+                List<T> rows = new ArrayList<>();
+                while (rs.next()) {
+                    rows.add(map.map(rs));
+                }
+                return rows;
+            }
+        } catch (SQLException e) {
+            throw failure("query on " + what, e);
+        }
+    }
+
+    /** A nullable integer column. */
+    private static Integer integer(ResultSet rs, String column) throws SQLException {
+        Object value = rs.getObject(column);
+        return value == null ? null : ((Number) value).intValue();
+    }
+
+    /** The first row's value; a NULL value reads as no value, as the legacy variable stays NULL. */
+    private static <T> Optional<T> firstRow(List<T> rows) {
+        return rows.isEmpty() ? Optional.empty() : Optional.ofNullable(rows.get(0));
     }
 
     private void execute(String statement) {

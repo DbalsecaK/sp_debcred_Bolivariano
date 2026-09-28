@@ -1,4 +1,4 @@
-# Production contract for `com.nexti.debcred` (Phase 1 + Phase 2 + Phase 3)
+# Production contract for `com.nexti.debcred` (Phase 1 + Phase 2 + Phase 3 + Phase 4)
 
 The characterization tests under this directory compile against exactly the types below. The
 implementation is written to match this file; if something here must change, change the tests in
@@ -494,3 +494,242 @@ procedure writes). A session whose header tables were never scripted (the Phase 
 row to the live update, i.e. "the order header exists in state I". `service()` wires the real
 `OrderHeaderTransition(this)` behind a wrapper that still logs `"orderHeaderStep"` and records the
 context.
+
+## Phase 4: notifications (B7, lines 746-1256)
+
+The stubbed `NotificationStep` of section 3 becomes a real step, `CustomerNotifications`. Everything else
+in this file stays, except where this section says "changes". Legacy oracle: lines 746-1256 (and 1358,
+2134, 2150-2170 for what B7 leaves behind). Business logic preserved as-is; brief section 7 A11
+(stray result set at 882 not emitted), A15 (notifier `@o_error` reaches the caller), A16 (lowest
+`ct_cod_catalogo` wins) and A17 (`@wRowdbBiz` from the live read only) approved. Rules: RULE-034,
+RULE-035, RULE-019, RULE-003, RULE-004, RULE-011, RULE-005, RULE-006, RULE-036, RULE-021, RULE-012.
+
+### New ports and records (all in `com.nexti.debcred`)
+
+```java
+public interface NotificationCatalogReader {              // db_biz_admempresa..ba_tabla / ba_catalogo
+    // 798-810: ct_cod_catalogo of EVERY row with tb_cod_tabla = ct_cod_tabla, tb_nom_tabla = 'ad_servicios_sms',
+    //   ct_nom_catalogo like '%' + ltrim(rtrim(servicio)) + '%'   (no escaping: % and _ stay wildcards, SEC parity),
+    //   right(ltrim(rtrim(ct_cod_catalogo)), 3) = canalSms, ct_est_catalogo = 'A'   (NO tb_est_tabla filter),
+    //   ORDER BY ct_cod_catalogo ascending (server sort order). Empty list = no row.
+    List<String> smsServiceCodes(String servicio, String canalSms);
+    // 998-1010: ct_otro_campo_catalogo of the row with tb_nom_tabla = 'ad_notificacion_basica',
+    //   ct_cod_catalogo = servicio (Sybase '=', the raw value, NOT trimmed), tb_est_tabla = 'A', ct_est_catalogo = 'A'.
+    //   Empty = no row or a NULL value (both end as 'OTRO').
+    Optional<String> notificationClass(String servicio);
+    // 1166-1180: exists a row with tb_nom_tabla = 'ba_bloqueaNotificacionSAT',
+    //   isnull(ct_nom_catalogo, '') = rtrim(servicio) + '-' + rtrim(servicioSms),
+    //   isnull(ct_otro_campo_catalogo, '') = rtrim(spName), ct_est_catalogo = 'A'   (NO tb_est_tabla filter).
+    //   The rtrim/concatenation is done in SQL with the raw values bound.
+    boolean notificationBlocked(String servicio, String servicioSms, String spName);
+}
+
+public interface OrderDetailReader {
+    // 826-838 db_biz_pagos..bp_orden x db_biz_pagos..bp_detalle: or_orden_banco = ordenBanco,
+    //   or_orden_banco = dt_orden_banco, dt_secuencial = secuencial, or_ordenante = ordenante
+    List<SwiftCreditDetail> liveSwiftCreditDetails(Integer ordenBanco, Integer secuencial, Integer ordenante);
+    // 844-856 same over db_sat_his..bp_orden_his x db_sat_his..bp_detalle_his
+    List<SwiftCreditDetail> historySwiftCreditDetails(Integer ordenBanco, Integer secuencial, Integer ordenante);
+    // 892-910 db_biz_pagos..bp_detalle x ba_tabla x ba_catalogo: dt_orden_banco = ordenBanco,
+    //   dt_referencia_grupo = substring(ct_nom_catalogo, 1, 9), tb_nom_tabla = 'ad_cuentas_bce',
+    //   tb_est_tabla = 'A', tb_cod_tabla = ct_cod_tabla, ct_est_catalogo = 'A'
+    List<InterbankCreditDetail> liveInterbankCreditDetails(Integer ordenBanco);
+    // 916-932 same with db_sat_his..bp_detalle_his
+    List<InterbankCreditDetail> historyInterbankCreditDetails(Integer ordenBanco);
+    // 1024-1030 UNQUALIFIED bp_detalle -> <cobis-database>..bp_detalle (brief 7 A8): dt_orden_banco = ordenBanco
+    List<BeneficiaryDetail> liveBeneficiaryDetails(Integer ordenBanco);
+    // 1036-1044 db_sat_his..bp_detalle_his: dt_orden_banco = ordenBanco
+    List<BeneficiaryDetail> historyBeneficiaryDetails(Integer ordenBanco);
+}
+// One element per row the SELECT returned, i.e. list size = @@rowcount. Raw column values; the step
+// applies the substrings and the variable widths.
+public record SwiftCreditDetail(String referenciaGrupo /*dt_referencia_grupo*/, String nomCuenta /*dt_nom_cuenta*/) {}
+public record InterbankCreditDetail(String catalogName /*ct_nom_catalogo, whole*/, Integer tipoCta /*dt_tipo_cta*/,
+        String numeroCuenta /*dt_numero_cuenta*/) {}
+public record BeneficiaryDetail(String nombreBeneficiario, String referenciaGrupo) {}
+
+public interface AccountOwnerReader {
+    Optional<Integer> currentAccountClient(String ctaBanco);            // 1110-1114 cob_cuentas..cc_ctacte.cc_cliente
+    Optional<Integer> savingsAccountClient(String ctaBanco);            // 1128-1132 cob_ahorros..ah_cuenta.ah_cliente
+    Optional<VirtualAccountOwner> virtualAccountOwner(String ctaBanco); // 1146-1152 cob_virtuales..vi_cuenta
+}
+public record VirtualAccountOwner(Integer cliente /*vi_cliente*/, Integer prodBanc /*vi_prod_banc*/) {}
+
+public interface BasicNotificationPort {                  // <cobis-database>..pa_sat_pnotificacion (1052-1082, A8)
+    BasicNotificationResult notifyBasic(BasicNotificationCommand c);
+}
+public record BasicNotificationCommand(String iCanal, String iCtadebito, Integer iTipctadeb, String iServicio,
+        Integer iOrdenBanco, String iDireccionTransf, Integer iSecuencial, BigDecimal iValor, String iNombrecred,
+        BigDecimal iComision, String iCtacred, String iProdCre, String iEmpresa) {}
+// oError: the @o_error OUTPUT after the call. The legacy passes its own @o_error, which is always 0 at that
+// point (line 256), so the adapter binds 0 as the input value; a procedure that never assigns it answers 0.
+public record BasicNotificationResult(int returnCode, Integer oError, String oMsg) {}
+
+public interface EventNotificationPort {                  // cob_internet..sp_eventos (1210-1242)
+    EventResult registerEvent(EventCommand c);
+}
+public record EventCommand(String iOperacion /*'I'*/, String iCanal /*@w_canal_sms*/, String iServicio /*@w_serv_sms*/,
+        Integer iProducto, String iCuenta, String iValor, String iCtaDeb, String iProdDeb, String iCtaCre,
+        String iProdCre, Integer iCliente, String iCosto, String iEmpresa, String iDescCanal) {}
+public record EventResult(int returnCode) {}
+```
+
+**Changes:** `AseSession` also extends `NotificationCatalogReader, OrderDetailReader, AccountOwnerReader,
+BasicNotificationPort, EventNotificationPort`. `JdbcAseSession` and `PgAseSession` implement them.
+
+```java
+// changes: two components added; the three-argument constructor keeps every Phase 1-3 test compiling
+public record NotificationOutcome(boolean configured, int returnCode, BigDecimal valorDebito,
+                                  Integer oError, Integer wRowdbBiz) {
+    public NotificationOutcome(boolean configured, int returnCode, BigDecimal valorDebito) {
+        this(configured, returnCode, valorDebito, 0, null);
+    }
+    public static NotificationOutcome notConfigured() { return new NotificationOutcome(false, 0, null, 0, null); }
+}
+
+public final class CustomerNotifications implements NotificationStep {
+    public CustomerNotifications(NotificationCatalogReader catalog, OrderDetailReader details,
+                                 AccountOwnerReader owners, BasicNotificationPort basic, EventNotificationPort events) { ... }
+}
+```
+
+`oError` = the value `@o_error` holds after B7: 0, except on the 'B' path where it is the notifier's
+output (may be NULL, A15). `wRowdbBiz` = the value `@wRowdbBiz` holds after B7: the `@@rowcount` of the
+**live** TRANSWIFT or interbank read (840/912), NULL when neither read ran (A17). `valorDebito` =
+the new working `@i_valor_debito` for TRANSCLI/TARJCRED/COMEXT (886), null otherwise ("no replacement").
+
+`DebitFlowConfiguration` wires `new CustomerNotifications(ase, ase, ase, ase, ase)` in place of the stub.
+`ProcedureSignatureCheck` also verifies, at startup, `PA_SAT_PNOTIFICACION` in `<cobis-database>` and
+`SP_EVENTOS` in `cob_internet` (lists below, same prefix rule as `SP_GRB_COMISION`).
+
+### The step, in legacy order (`notify(ctx)`)
+
+Working values: `r = ctx.request()`, `servicio = r.iServicio()`, `trim(x)` = `ltrim(rtrim(x))` with blanks
+only, where an all-blank result is NULL (ASE).
+
+0. **Entry guard.** If `trim(servicio)` is NULL (a NULL or all-blank service), return `notConfigured()`
+   without reading anything: line 746 `ltrim(rtrim(@i_servicio)) <> 'PAGOPRV'` is unknown there and the
+   legacy never enters B7 (the Phase 1 service guard lets such a request reach the step).
+1. **Channel (760-794, RULE-035).** `canalSms = convert(char(3), r.iCanal())`: the first three characters,
+   right-padded with blanks. `canalSms` equal (trailing blanks ignored) to `DIR` or `SAT` -> `canalSms =
+   "SAT"`, `descCanal = "SAT"`; `BNK` -> `"IBK"`, `"24OnLine"`; `VEN` -> `canalSms` unchanged,
+   `"Ventanilla"`; anything else -> unchanged, `descCanal = null`. The tests compare `canalSms`
+   ignoring trailing blanks.
+2. **SMS service (798-810, RULE-035, A16).** `codes = catalog.smsServiceCodes(servicio, canalSms)`; if
+   empty -> `notConfigured()`. Else take `codes.get(0)` (the lowest) and derive
+   `servSms = trim(substring(code, 1, patindex('%-%', code) - 1))` truncated to varchar(10). A code with
+   no `-` gives `substring(code, 1, -1)` = NULL in ASE; a code starting with `-` gives length 0 = NULL;
+   a blank prefix trims to NULL. **A NULL `servSms` is `notConfigured()`** (line 814 false), even though a
+   row matched and even if a higher code would have given a value (A16: the row is chosen first).
+3. From here the outcome is `configured = true`; `returnCode = 0` unless a notifier is called.
+4. **TRANSWIFT (820-874, RULE-019)**, `trim(servicio)` = `TRANSWIFT`: `live = details.liveSwiftCreditDetails(
+   r.iOrden(), r.iSecuencial(), r.iEmpresa())`; `wRowdbBiz = live.size()`; if `live` is empty,
+   `details.historySwiftCreditDetails(same)` (`wRowdbBiz` stays 0). From the row found (any, if
+   several): `empInst = referenciaGrupo` (varchar(32)), `ctaCre = substring(nomCuenta, 1, 30)`; none found:
+   both NULL. `valorComision = ctx.valorComision()` (the normalized `@i_valor_comision`).
+   Any other service: `empInst = ctaCre = null`, `valorComision = null`.
+5. **Interbank (878-976, RULE-003, RULE-004, RULE-011)**, `trim(servicio)` in `TRANSCLI, TARJCRED, COMEXT`:
+   `valorComision = ctx.comision()` (normalized `@i_comision`); **new working debit value =
+   `r.iValorOrdenado()`** (returned as `valorDebito`, used by the movement and by step 7); the line-882
+   result set is NOT emitted (A11). `live = details.liveInterbankCreditDetails(r.iOrden())`; `wRowdbBiz =
+   live.size()`; if empty, `details.historyInterbankCreditDetails(r.iOrden())`. From the row found:
+   `empInst = substring(catalogName, 10, 32)` (NULL when the name has fewer than 10 characters),
+   `tipCta = tipoCta`, `ctaCre = numeroCuenta` (varchar(30)); none found: all three stay NULL. `prodCre`:
+   `tipCta` 0 -> NULL, 3 -> `CTE`, 4 -> `AHO`.
+6. **Outside that branch (956-974, RULE-004/005):** `tipCta` 9 -> `CON`, 8 -> `ESP` (`tipCta` is only ever
+   set by step 5, so this matters only for the interbank services). Any other value, NULL included:
+   `prodCre = null`.
+7. **Cost and value texts (980-986, RULE-006):** `costo = isnull(valorComision, 0) + isnull(r.iValor2Swift(), 0)`;
+   `valorSms = convert(varchar(11), <working debit value>)` and `costoSms = convert(varchar(11), costo)`:
+   ASE money-to-text, plain digits, `.`, exactly two decimals (a 4-decimal money is rounded to cents), no
+   thousands separator, NULL stays NULL (`100 -> "100.00"`, `0.5 -> "0.50"`, `99999999.99` is the
+   longest value that fits 11 characters; longer values are an open question, not pinned).
+8. **Classification (994-1014, RULE-036):** `cls = catalog.notificationClass(servicio)`, the value
+   truncated to varchar(4), default `OTRO`. Compared with Sybase `=` (trailing blanks ignored): `B`,
+   `OTRO` (so `OTROS` -> `OTRO`), anything else -> no notifier at all.
+9. **'B' (1020-1082):** `live = details.liveBeneficiaryDetails(r.iOrden())`; if empty, history. From the
+   row found: `nombre` (varchar(64)), `refGrupo` (varchar(20)); none: both NULL. Then
+   `basic.notifyBasic(new BasicNotificationCommand(r.iCanal() /*raw, NOT canalSms*/, r.iNumctaEmp(),
+   r.iTipctaEmp(), r.iServicio(), r.iOrden(), refGrupo, r.iSecuencial(), r.iValorOrdenado(), nombre,
+   ctx.valorComision(), ctaCre, prodCre, empInst))`; `returnCode = result.returnCode()`; **`oError =
+   result.oError()`** (A15). This read does not touch `wRowdbBiz`.
+10. **'OTRO' (1094-1242):** debtor product and client (RULE-005): type 3 -> `CTE`,
+    `owners.currentAccountClient(numcta)`; 4 -> `AHO`, `savingsAccountClient`; 12 -> `VIR`, then with a
+    `virtualAccountOwner` row: `cliente`, and `AHO` when `prodBanc == 13`; no row keeps `VIR` / NULL.
+    Then (always, after the owner read) `blocked = catalog.notificationBlocked(servicio, servSms,
+    r.iSpName())` (RULE-021). BCE exception: `canalSms` = `BCE` and `servicio` = `ROLPAGO` (Sybase `=`,
+    not trimmed on the left) and `r.iNumctaEmp() == null`. If not blocked and not the BCE exception:
+    `events.registerEvent(new EventCommand("I", canalSms, servSms, r.iTipctaEmp(), r.iNumctaEmp(),
+    valorSms, r.iNumctaEmp(), prodDeb, ctaCre, prodCre, cliente, costoSms, empInst, descCanal))`;
+    `returnCode = result.returnCode()`.
+11. Return `new NotificationOutcome(true, returnCode, <new debit value or null>, oError /*0 unless 'B'*/, wRowdbBiz)`.
+
+Several rows from a scalar-assignment read (e.g. the interbank join by order only): the legacy keeps an
+undefined row. The step may keep any row, but the fields of one read come from **one and the same row**;
+the rowcount is the number of rows. (Open question, not a rule.)
+
+**Adapter (architecture review Phase 4 H1):** a notifier that raises an error (the COBIS `raiserror` +
+return code convention) answers that status, not an exception: `JdbcAseSession` returns the return status
+jTDS already read, else the ASE error number, else -1, so the step sees a non-zero code and exit A runs as
+in the legacy. A lost transaction (1205, 08xxx) still throws `AseTransactionAbortedException`. The text
+below is the contract as first written:
+A port that throws propagates (section 1). The legacy would see a negative return status from a failing
+notifier and take exit A; that path is an open question and is not pinned.
+
+### Service changes (section 4)
+
+- Step 10 (notification): when `configured`: `codErrord = returnCode` (1248), `valorDebito` replaced when
+  non-null (886), **`oError` (working `@o_error`) = `outcome.oError()`**, **`wRowdbBiz = outcome.wRowdbBiz()`**.
+  Not configured: nothing changes (`oError` 0, `wRowdbBiz` NULL).
+- Step 14 (SPI return, 1352-1358): `wRowdbBiz = liveService present ? 1 : 0` (the live lookup's
+  `@@rowcount`; the history lookup does not reassign it).
+- Step 17 / Phase 3: `OrderHeaderContext.priorRowCount = wRowdbBiz`. The component keeps its Phase 3 name
+  (it means "`@wRowdbBiz` as B12 finds it"); renaming it to `wRowdbBizBeforeB12` would touch nine Phase 3
+  call sites for no behavioral gain.
+- Success (2134): `DebitResult(0, oError == null ? 0 : oError, null)`.
+- Exit C with `iAplcobis = 'S'` (2150-2158) does not assign `@o_error`: `DebitResult(numError, oError, null)`,
+  i.e. the notifier's output (NULL included) after a 'B' notification, 0 otherwise. Exit C with 'N', exit A
+  and exit B overwrite `@o_error` as before.
+
+### Adapters
+
+`JdbcAseSession`: `{? = call <cobis>..pa_sat_pnotificacion(15 placeholders)}` with parameters 2-14 in the
+command order, 15 = `@o_error` (`setInt(15, 0)` and `registerOutParameter(15, INTEGER)`), 16 = `@o_msg`
+(`registerOutParameter(16, VARCHAR)`); result `(getInt(1), (Integer) getObject(15), getString(16))`.
+`{? = call cob_internet..sp_eventos(14 placeholders)}` in the command order; result `getInt(1)`. Reads as
+the port comments above, one `PreparedStatement` each, bound in the order the WHERE clause names them;
+the catalogue columns are the legacy ones (`tb_cod_tabla`, `tb_nom_tabla`, `tb_est_tabla`, `ct_cod_tabla`,
+`ct_cod_catalogo`, `ct_nom_catalogo`, `ct_otro_campo_catalogo`, `ct_est_catalogo`). Integer columns are
+read null-safely (`getObject` + `Number`, or `getInt` + `wasNull`). Integer arguments are bound with `setObject(i, value, Types.INTEGER)` (`Types.SMALLINT` for `@i_tipctadeb` / `@i_producto`), text with `setString`, money with `setBigDecimal`. **Exactly one `?` per procedure parameter** (indices 2..count+1): the Phase 1-3 helper `call(procedure, lastParameter, ...)` emits `lastParameter` placeholders while binding only 2..lastParameter, i.e. one unbound `?` (see the Phase 4 report); the Phase 4 tests pin the correct count.
+
+```java
+static final List<String> PA_SAT_PNOTIFICACION = List.of("@i_canal", "@i_ctadebito", "@i_tipctadeb", "@i_servicio",
+        "@i_orden_banco", "@i_direccion_transf", "@i_secuencial", "@i_valor", "@i_nombrecred", "@i_comision",
+        "@i_ctacred", "@i_prod_cre", "@i_empresa", "@o_error", "@o_msg");
+static final List<String> SP_EVENTOS = List.of("@i_operacion", "@i_canal", "@i_servicio", "@i_producto", "@i_cuenta",
+        "@i_valor", "@i_cta_deb", "@i_prod_deb", "@i_cta_cre", "@i_prod_cre", "@i_cliente", "@i_costo", "@i_empresa",
+        "@i_desc_canal");
+```
+
+### Test doubles
+
+`FakeAseSession` implements the five ports over small in-memory tables with the legacy WHERE clauses
+(Sybase `=`, LIKE with `%`/`_`, NULL never equal): `catalogRow(table, code, name, otherField, state)` and
+`catalogTableState(table, state)` (default `'A'`) with the shortcuts `smsService(code, name)`,
+`notificationClass(service, value)`, `blockedNotification(key, spName)`, `bceInstitution(name)`; order
+detail rows in `DetailTable.LIVE` / `HISTORY` via `swiftDetail(...)`, `interbankDetail(...)`,
+`beneficiaryDetail(...)`, `detailRow(...)`; account masters via `currentAccountOwner`,
+`savingsAccountOwner`, `virtualAccountOwner`; notifier answers via `basicNotification(returnCode, oError,
+oMsg)` (default `(0, 0, null)`) and `event(returnCode)` (default 0). Both notifiers log their procedure
+name in `calls()` and **always record a write** (`"pa_sat_pnotificacion"`, `"sp_eventos"`), so the
+exit-A savepoint rollback and the exit-B/C full rollback are seen to discard them. Every read is logged,
+in order, in `notificationLog()` (not in `calls()`, which keeps its Phase 1-3 meaning of procedure calls
+plus transaction statements), with its arguments in the `...Queries()` lists; the two notifier calls also
+appear in `notificationLog()` so read-then-call order can be asserted. The SMS read returns the matching
+codes sorted with `String.compareTo` (a binary sort order).
+
+`service()` wires the real `CustomerNotifications(this, this, this, this, this)` behind the logging
+`NotificationStep` (still `"notificationStep"` + the context). **`notification(outcome)` still scripts the
+step** (it then answers that outcome without running the real step): this keeps `NotificationStubTest`
+unchanged. An unscripted session with an empty catalogue answers `notConfigured()`, exactly the Phase 1
+stub, so no Phase 1-3 expectation moves.

@@ -1,4 +1,4 @@
-# Characterization tests: `sp_debcred_empresa` (Phase 1 + Phase 2 + Phase 3)
+# Characterization tests: `sp_debcred_empresa` (Phase 1 + Phase 2 + Phase 3 + Phase 4)
 
 These tests pin what `legacy/debcred/sp_debcred_empresa.sp` **actually does** in blocks B0-B6,
 B8, B9, B14 and B15 (lines 1-740, 1260-1492, 2130-2170) so the Java service can be proven
@@ -6,8 +6,12 @@ equivalent. The legacy is the oracle: the suspected defects the approver confirm
 (`analysis/debcred/RULE_REVIEWS.json`) are asserted as behavior, not fixed. Phase 2 adds blocks
 B10/B11 (lines 1496-1856): the two `sp_grb_comision` calls and exit B, including the approved quirk
 of brief section 7 A14 (a commission failure that leaves `@w_cod_errord = 0` returns 0 / 0 after a
-full rollback). Notifications (B7) are a stub here; the order-header update (B12) is a later phase
-and only its stub is shown to be reached.
+full rollback). Phase 3 adds the order-header update B12 (lines 1862-2090). Phase 4 adds the
+notifications B7 (lines 746-1256): channel and SMS service, the TRANSWIFT and interbank detail reads
+with their history fallback, the TRANSCLI/TARJCRED/COMEXT debit-value override, the cost texts, the
+'B' / 'OTRO' routing, the block list, and what B7 leaves for the exits (brief section 7 A15: the
+notifier's `@o_error`; A17: `@wRowdbBiz` from the live read). `NotificationStubTest` keeps pinning
+the step boundary with a scripted outcome.
 
 The production types the tests compile against are fixed in [`CONTRACT.md`](CONTRACT.md).
 
@@ -45,7 +49,18 @@ JUnit Platform through Surefire; jqwik keeps its failure database under `target/
 | `Rule018HistoryFallbackTest` | B12 history fallback (1898-1924 and siblings) | RULE-018, RULE-010 |
 | `Rule010NoHeaderUpdatedTest` | 2076-2090, stale `@wRowdbBiz`, `@@error` parity | RULE-010, RULE-014, RULE-023, RULE-024, RULE-028 |
 | `Walkthrough1EndToEndTest` | brief section 4, walkthrough 1 | RULE-009, RULE-012, RULE-013, RULE-014 |
-| `GoldenCasesTest` + `resources/golden/phase1-cases.json` + `phase2-cases.json` + `phase3-cases.json` | the four exits and B12 | table-driven, one dynamic test per case, one count over all files |
+| `Rule035Rule034NotificationChannelAndSmsServiceTest` | B7 entry, channel, SMS service (746-814) | RULE-035, RULE-034, brief A16 |
+| `Rule019SwiftNotificationDetailTest` | TRANSWIFT detail reads (820-874) | RULE-019, RULE-006, A17 |
+| `Rule003Rule004Rule011InterbankNotificationTest` | TRANSCLI/TARJCRED/COMEXT (878-976) | RULE-003, RULE-004, RULE-011, RULE-005 |
+| `Rule006NotificationCostAndValueTextTest` | cost and value texts (980-986) | RULE-006 |
+| `Rule036BasicNotificationAndA15Test` | classification and `pa_sat_pnotificacion` (994-1082), 2134, 2150-2170 | RULE-036, brief A15, RULE-012 |
+| `Rule005Rule021EventNotificationTest` | 'OTRO', debtor product/client, block list, BCE, `sp_eventos` (1094-1248) | RULE-005, RULE-021, RULE-034 |
+| `Rule034Rule012NotificationFailureReversesDebitTest` | 1248 -> exit A on committed state | RULE-034, RULE-012 (P0) |
+| `Rule010A17RowCountAfterNotificationTest` | `@wRowdbBiz` (840, 912, 1358) into B12 (2076-2090) | brief A17, RULE-010, RULE-014, RULE-023 |
+| `Walkthroughs1To4WithNotificationsTest` | brief section 4, walkthroughs 1-4 with a configured notification | RULE-034, RULE-019, RULE-004, RULE-012, RULE-013 |
+| `Rule034NotificationWiringTest` | `DebitFlowConfiguration` wires the real step | RULE-034, RULE-012, RULE-035 |
+| `ase/JdbcAseSessionNotificationPortsTest` | SQL and call text of the Phase 4 ports | RULE-035/036/021/019/004/005/034, A8, A15 |
+| `GoldenCasesTest` + `resources/golden/phase1-cases.json` ... `phase4-cases.json` | the four exits, B12 and B7 | table-driven, one dynamic test per case, one count over all files |
 | `support/FakeAseSession` | the ASE connection | records call order and committed state |
 | `support/Requests` | the 45 inputs | fake fixture values |
 
@@ -87,7 +102,29 @@ prints `equivalence cases executed: N`.
 | A | debit procedure returned non-zero, or account type not in (3,4,9,12) -> 122001 | `rollbackToSavepoint("sp_debito_empresa")`, movement `X` + code, `commit` | `DebitResult(code, code, null)`; never `sp_cerror` |
 | B | first `sp_grb_comision` failed (return value, `@@error` or `@o_error`) | full `rollback()`, then movement `X` / `COBRO DE COMISION` / `cod_error = @o_error` written in autocommit; **no commit** | `DebitResult(oError, oError, null)`, `(0, 0, null)` when `@o_error` stayed 0 (A14); never `sp_cerror` |
 | C | 120000 (no accounting config), 122002 (movement write failed), SWIFT commission failed (its `@o_error` or 122003) | `rollback()` only if `begin()` happened | aplcobis `N`: `(0, code, null)`; aplcobis `S`: `sp_cerror(sp_name, code)`, `(code, 0, null)` |
-| OK | everything returned 0 | `commit` | `(0, 0, null)` |
+| OK | everything returned 0 | `commit` | `(0, 0, null)`; `(0, n, null)` after a 'B' notification whose `@o_error` was `n` (A15) |
+
+Phase 4 additions: a configured notifier that returns non-zero takes exit A with its code (1248); exit C
+in COBIS mode keeps the working `@o_error`, which after a 'B' notification is the notifier's output
+(NULL included), so it answers `(code, n, null)`.
+
+## Phase 4 test double API
+
+- Catalogue: `smsService(code, name)`, `notificationClassRow(service, value)`,
+  `blockedNotification(key, spName)`, `bceInstitution(name)`, or the generic
+  `catalogRow(table, code, name, otherField, state)` / `catalogTableState(table, state)`.
+- Order detail: `swiftDetail(DetailTable.LIVE|HISTORY, order, secuencial, ordenante, referenciaGrupo, nomCuenta)`,
+  `interbankDetail(table, order, referenciaGrupo, tipoCta, numeroCuenta)`,
+  `beneficiaryDetail(table, order, nombre, referenciaGrupo)`, `detailRow(table, DetailRow)`.
+- Account masters: `currentOwner(account, client)`, `savingsOwner(...)`, `virtualOwner(account, client, prodBanc)`.
+- Notifiers: `event(returnCode)`, `basicNotification(returnCode, oError, oMsg)`.
+- Observations: `notificationLog()` (every B7 read and notifier call, in order; not in `calls()`),
+  `smsQueries()`, `classQueries()`, `blockQueries()`, `swiftQueries()`, `interbankQueries()`,
+  `beneficiaryQueries()`, `ownerQueries()`, `onlyEvent()`, `onlyBasicNotification()`. The two notifiers are
+  in `calls()` and always record a write, so rollbacks are seen to discard them.
+- `notification(outcome)` still scripts the whole step (the Phase 1 stub tests); otherwise `service()` runs the
+  real `CustomerNotifications`. An empty catalogue answers "not configured", exactly the old stub.
+- The step can be called directly: `new CustomerNotifications(ase, ase, ase, ase, ase).notify(context)`.
 
 ## Adding a case
 
@@ -101,7 +138,12 @@ prints `equivalence cases executed: N`.
    `golden/phase2-cases.json` (commissions, exit B) instead; both files share one schema, the
    Phase 2 inputs (`comision`, `valorComision`, `valor2Swift`, `codSwift`, `frmPagcobSpi`,
    `commissionReturnCode`/`commissionOError`, `secondCommissionReturnCode`/`secondCommissionOError`)
-   and `expected.movementStatuses` are optional.
+   and `expected.movementStatuses` are optional. Phase 3 and Phase 4 cases go to `phase3-cases.json` /
+   `phase4-cases.json`; the Phase 4 inputs (`smsServices`, `notificationClass`, `blocked`, `bceInstitutions`,
+   `interbankDetails`, `swiftDetails`, `beneficiaryDetails`, `currentOwner`, `virtualOwner`,
+   `eventReturnCode`, `basicReturnCode`/`basicOError`, `valorDebito`, `valorOrdenado`, `spName`, `numcta`,
+   `secuencial`) and expectations (`events`, `basicNotifications`, `movementValor`, `event`,
+   `priorRowCount`, a JSON-null `oError`) are described in that file's `_comment`.
 5. If the behavior is not implemented yet, mark the test `@Disabled("pending RULE-NNN")`; never
    delete it.
 
@@ -115,4 +157,10 @@ configured through environment variables only.
 
 No engine on this machine runs Sybase T-SQL, so the expected values are read from the source, not
 recorded. The best verdict is PARTLY PROVEN until the bank's recorded outputs (section 7 A6) are
-added to `golden/phase1-cases.json` / `golden/phase2-cases.json`.
+added to the `golden/phase*-cases.json` files.
+
+Phase 4 expectations derived from ASE semantics rather than read off a branch (to confirm with those
+recorded outputs): a catalogue code without '-' gives a NULL SMS service (`substring(x, 1, -1)`); an
+all-blank service never enters B7; money-to-varchar rounds a 4-decimal amount to cents; a 9-character
+`ad_cuentas_bce` name gives a NULL institution. Not pinned at all (open questions): which row a
+multi-row scalar read keeps, and `convert(varchar(11), money)` for values of 12+ characters.
