@@ -28,6 +28,13 @@ Then, from another terminal (or Postman), post the sample request:
 curl -H "Content-Type: application/json" --data @local-pg/request-transcli.json http://localhost:8080/debitos-empresa
 ```
 
+Or run the six scenarios in one go (success, exits A and B, notification failure, unknown key, amount out of
+range); each reloads the data and prints the reply and what stayed in the database:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File local-pg\probar-escenarios.ps1
+```
+
 ## Simulate failures
 
 Every simulated procedure answers `(0, 0)` unless `sim.falla` says otherwise; every call is logged in
