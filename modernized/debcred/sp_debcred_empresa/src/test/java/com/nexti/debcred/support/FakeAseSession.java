@@ -17,7 +17,12 @@ import com.nexti.debcred.AccountingConfigurationQuery;
 import com.nexti.debcred.AsePortException;
 import com.nexti.debcred.AseSession;
 import com.nexti.debcred.CatalogReader;
+import com.nexti.debcred.CommissionCommand;
 import com.nexti.debcred.CommissionContext;
+import com.nexti.debcred.CommissionDebits;
+import com.nexti.debcred.CommissionOutcome;
+import com.nexti.debcred.CommissionPort;
+import com.nexti.debcred.CommissionResult;
 import com.nexti.debcred.CommissionStep;
 import com.nexti.debcred.CommissionTariffPort;
 import com.nexti.debcred.CommissionTariffQuery;
@@ -56,10 +61,17 @@ import com.nexti.debcred.VirtualDebitNoteResult;
  * {@code rollback} discards all pending writes; {@code commit} moves them to {@code committed}.
  * A write outside a transaction is committed at once (ASE autocommit, needed by exit B in Phase 2).
  *
+ * <p>Phase 2: the session is also the {@link CommissionPort} ({@code sp_grb_comision}); the answers
+ * are scripted separately for the first call ({@link #commission}) and for the SWIFT call
+ * ({@link #secondCommission}, recognised by {@code iTipoafec = "16"}). {@link #service()} wires the
+ * real {@link CommissionDebits} behind a thin {@link CommissionStep} that keeps logging
+ * {@code "commissionStep"} and recording the {@link CommissionContext}, so the Phase 1 sequence
+ * assertions still hold.
+ *
  * <p>Fixture accessors such as {@link #onlyDebitNote()} throw an {@link AssertionError} when the
  * call did not happen: a test never passes because the thing it inspects is missing.
  */
-public final class FakeAseSession implements AseSession, NotificationStep, CommissionStep, OrderHeaderStep {
+public final class FakeAseSession implements AseSession, NotificationStep, OrderHeaderStep {
 
     public static final String SAVEPOINT = "sp_debito_empresa";
 
@@ -85,12 +97,17 @@ public final class FakeAseSession implements AseSession, NotificationStep, Commi
     private VirtualDebitNoteResult virtualDebitResult = new VirtualDebitNoteResult(0, 0, 9002);
     private LedgerDebitResult ledgerDebitResult = new LedgerDebitResult(0);
     private MovementResult movementResult = new MovementResult(0);
+    private MovementResult secondMovementResult;
     private boolean movementThrows;
     private Optional<String> ndcorpeiConcept = Optional.empty();
     private final Set<String> basicAccounts = new HashSet<>();
     private final Map<Integer, String> liveOrderServices = new HashMap<>();
     private final Map<Integer, String> historyOrderServices = new HashMap<>();
     private NotificationOutcome notificationOutcome = NotificationOutcome.notConfigured();
+    private CommissionResult commissionResult = new CommissionResult(0, 0);
+    private CommissionResult secondCommissionResult = new CommissionResult(0, 0);
+    private boolean commissionThrows;
+    private boolean secondCommissionThrows;
 
     // ---- what the ports received --------------------------------------------------------------
     private final List<CommissionTariffQuery> tariffQueries = new ArrayList<>();
@@ -102,6 +119,7 @@ public final class FakeAseSession implements AseSession, NotificationStep, Commi
     private final List<ErrorReport> errorReports = new ArrayList<>();
     private final List<NotificationContext> notifications = new ArrayList<>();
     private final List<CommissionContext> commissionSteps = new ArrayList<>();
+    private final List<CommissionCommand> commissionCommands = new ArrayList<>();
     private final List<OrderHeaderContext> orderHeaderSteps = new ArrayList<>();
     private final List<String> basicAccountChecks = new ArrayList<>();
     private final List<Integer> liveOrderLookups = new ArrayList<>();
@@ -112,10 +130,19 @@ public final class FakeAseSession implements AseSession, NotificationStep, Commi
         accountingResults.add(new AccountingConfiguration(0, 2701, "0150"));
     }
 
-    /** The service under test wired to this session for every collaborator. */
+    /**
+     * The service under test wired to this session for every collaborator. The commission step is
+     * the real {@link CommissionDebits} (Phase 2) over this session's commission port, movement port
+     * and transaction; the wrapper only logs {@code "commissionStep"} and keeps the context.
+     */
     public DebitCompanyAccountService service() {
-        return new DebitCompanyAccountService(this, this, this, this, this, this, this, this, this, this, this,
-                this, this, this);
+        CommissionDebits debits = new CommissionDebits(this, this, this);
+        CommissionStep logged = ctx -> {
+            calls.add("commissionStep");
+            commissionSteps.add(ctx);
+            return debits.apply(ctx);
+        };
+        return new DebitCompanyAccountService(this, this, logged, this);
     }
 
     // ---- scripting -----------------------------------------------------------------------------
@@ -166,6 +193,12 @@ public final class FakeAseSession implements AseSession, NotificationStep, Commi
         return this;
     }
 
+    /** Answer of the SECOND sp_grb_mov_y_frmpgo call, i.e. the exit-B 'X' movement (line 1628); the first keeps {@link #movement}. */
+    public FakeAseSession secondMovement(int returnCode) {
+        this.secondMovementResult = new MovementResult(returnCode);
+        return this;
+    }
+
     public FakeAseSession ndcorpeiConcept(String code) {
         this.ndcorpeiConcept = Optional.ofNullable(code);
         return this;
@@ -188,6 +221,30 @@ public final class FakeAseSession implements AseSession, NotificationStep, Commi
 
     public FakeAseSession notification(NotificationOutcome outcome) {
         this.notificationOutcome = outcome;
+        return this;
+    }
+
+    /** Answer of the first {@code sp_grb_comision} call (line 1518): return value and {@code @o_error}. */
+    public FakeAseSession commission(int returnCode, Integer oError) {
+        this.commissionResult = new CommissionResult(returnCode, oError);
+        return this;
+    }
+
+    /** Answer of the second, SWIFT {@code sp_grb_comision} call (line 1746, {@code @i_tipoafec = '16'}). */
+    public FakeAseSession secondCommission(int returnCode, Integer oError) {
+        this.secondCommissionResult = new CommissionResult(returnCode, oError);
+        return this;
+    }
+
+    /** The first {@code sp_grb_comision} call raises a SQL error ({@code @@error <> 0}, line 1606). */
+    public FakeAseSession commissionThrows() {
+        this.commissionThrows = true;
+        return this;
+    }
+
+    /** The SWIFT {@code sp_grb_comision} call raises a SQL error ({@code @@error <> 0}, line 1824). */
+    public FakeAseSession secondCommissionThrows() {
+        this.secondCommissionThrows = true;
         return this;
     }
 
@@ -310,10 +367,11 @@ public final class FakeAseSession implements AseSession, NotificationStep, Commi
         if (movementThrows) {
             throw new AsePortException("simulated @@error on sp_grb_mov_y_frmpgo");
         }
-        if (movementResult.returnCode() == 0) {
+        MovementResult result = movements.size() >= 2 && secondMovementResult != null ? secondMovementResult : movementResult;
+        if (result.returnCode() == 0) {
             write("sp_grb_mov_y_frmpgo", c);
         }
-        return movementResult;
+        return result;
     }
 
     @Override
@@ -329,11 +387,18 @@ public final class FakeAseSession implements AseSession, NotificationStep, Commi
         return notificationOutcome;
     }
 
+    // sp_grb_comision debits the commission and records its own movement: like the three debit
+    // procedures it ALWAYS leaves a write, so exit B's full rollback (line 1624) is seen to discard it.
     @Override
-    public int apply(CommissionContext ctx) {
-        calls.add("commissionStep");
-        commissionSteps.add(ctx);
-        return 0;
+    public CommissionResult charge(CommissionCommand c) {
+        calls.add("sp_grb_comision");
+        commissionCommands.add(c);
+        write("sp_grb_comision", c);
+        boolean swift = "16".equals(c.iTipoafec());
+        if (swift ? secondCommissionThrows : commissionThrows) {
+            throw new AsePortException("simulated @@error on sp_grb_comision");
+        }
+        return swift ? secondCommissionResult : commissionResult;
     }
 
     @Override
@@ -471,6 +536,22 @@ public final class FakeAseSession implements AseSession, NotificationStep, Commi
 
     public CommissionContext onlyCommissionStep() {
         return only(commissionSteps, "commissionStep");
+    }
+
+    public List<CommissionCommand> commissionCommands() {
+        return List.copyOf(commissionCommands);
+    }
+
+    public CommissionCommand onlyCommissionCommand() {
+        return only(commissionCommands, "sp_grb_comision");
+    }
+
+    /** The two movements of exit B (the Phase 1 'P' one, then the 'X' one written after the rollback). */
+    public MovementCommand lastMovement() {
+        if (movements.isEmpty()) {
+            throw new AssertionError("expected at least one call to sp_grb_mov_y_frmpgo but recorded none");
+        }
+        return movements.get(movements.size() - 1);
     }
 
     public List<OrderHeaderContext> orderHeaderSteps() {

@@ -1,4 +1,4 @@
-# Production contract for `com.nexti.debcred` (Phase 1)
+# Production contract for `com.nexti.debcred` (Phase 1 + Phase 2)
 
 The characterization tests under this directory compile against exactly the types below. The
 implementation is written to match this file; if something here must change, change the tests in
@@ -295,3 +295,121 @@ trimmed ones.
 Commission debits (B10/B11), order-header update (B12), notifications (B7) and the REST facade.
 The stubs above exist so the flow can be shown to reach them. The stray result set at line 882 and
 `@o_reg_a_proc` are approved differences (brief section 7 A11).
+
+## Phase 2: commission debits (B10/B11, lines 1496-1856)
+
+The stubbed `CommissionStep` of section 3 becomes a real step. Everything else in this file stays.
+Legacy oracle: lines 1496-1856; assumed contract of `sp_grb_comision`: `DATA_OBJECTS.md`,
+"CommissionDebitPayload". Business logic preserved as-is; brief section 7 A14 approved.
+
+### New port and records
+
+```java
+public interface CommissionPort {                                    // cobis..sp_grb_comision (1518, 1746)
+    CommissionResult charge(CommissionCommand c);
+}
+public record CommissionCommand(Integer sSsn, String sSrv, String sUser, String sTerm, Integer sOfi, String iAplcobis,
+        String iSpName, LocalDateTime iFechaProceso, String iCanalComision, Integer iEmpresa, Integer iProducto,
+        String iServicio, String iTipoProceso, Integer iOrdenBanco, BigDecimal iValorComision, String iCadena,
+        String iTarjeta, String iFrmPagcob, Integer iMoneda, Integer iTipctaEmp, String iNumctaEmp, String iReferencia,
+        String iDetalleRef, String iTipoPagcob, Integer iPaisCta, Integer iCodBancoCta, String iNemOrdenante,
+        Integer iLocalidadPagcob, String iNombreCuenta /*null*/, String iNombreBeneficiario /*null*/,
+        Integer iOrdenEmpresa, String iTipoHorario /*= iTipoReferencia*/, String iTipoafec /*null on the first call, "16" on the SWIFT call*/,
+        String iSavepoint, int iSecuencial /*0*/, BigDecimal iValorTarifa, BigDecimal iValorComisionCue,
+        BigDecimal iValorTarifaEfe, BigDecimal iValorComisionEfe, BigDecimal iValorTarifaChe, BigDecimal iValorComisionChe) {}
+public record CommissionResult(int returnCode, Integer oError) {}
+```
+
+`AseSession` also extends `CommissionPort` (the eleventh procedure of the same connection). A
+`null` `oError` reads as 0: the `@o_error output` variable keeps the value it held before the call,
+which on this path is always 0 (`@w_cod_errord` is 0 whenever the step is reached, and the second
+call is only reached when the first left it at 0).
+
+### The step
+
+```java
+public interface CommissionStep {
+    CommissionOutcome apply(CommissionContext ctx);
+}
+public sealed interface CommissionOutcome {
+    record Continue(String frmPagcob) implements CommissionOutcome {}   // the working payment form after the TRANSQUICK swap
+    record ExitB(int oError)        implements CommissionOutcome {}   // step already rolled back and wrote the 'X' movement
+    record LblError(int numError)   implements CommissionOutcome {}   // service runs exit C
+}
+public record CommissionContext(DebitRequest request, BigDecimal comision, BigDecimal valorComision,
+        String frmPagcob, Integer trn, String causal, String savepoint /*"sp_debito_empresa"*/, Integer tranNcnd,
+        String cadena, String servicio, String terminal, Integer sSsn) {}
+public final class CommissionDebits implements CommissionStep {
+    public CommissionDebits(CommissionPort commissions, MovementPort movements, AseTransaction tx) { ... }
+}
+```
+
+`CommissionContext` carries the **working** values of the legacy variables the block reads, not the
+request's: `comision`/`valorComision` after normalization (188-196), `trn`/`causal` as the debit used
+them (after the CORPEI re-resolution), `tranNcnd` (`@w_tran_ncnd`, null for type 9), `cadena`
+(`@w_cadena`, the Phase 1 reference string: `"COD:"+swift`, the company order as text, or null for
+type 9 where it is never assigned), `servicio` (`@i_servicio` after the SPI-return lookup, step 14),
+`terminal` (`@s_term`, `" "` for SPI, step 7) and `sSsn` (`@s_ssn ?? 0`, step 6). The four extra
+components after `tranNcnd` (`cadena`, `servicio`, `terminal`, `sSsn`) are needed because lines
+1520-1550, 1630-1668 and 1748-1778 read those mutated variables; the tests observe them only through
+the port arguments.
+
+The service (step 17 of section 4) now does, in place of the stub call:
+
+```java
+switch (commission.apply(ctx)) {
+    case ExitB b      -> return new DebitResult(b.oError(), b.oError(), null);   // no commit (1698-1700)
+    case LblError e   -> return errorExit(request, e.numError(), true);          // exit C, rollback, 1834
+    case Continue c   -> orderHeader.update(...); tx.commit(); return new DebitResult(0, 0, null);
+}
+```
+
+### Behavior pinned (order exactly as the legacy)
+
+1. `frmPagcob = ctx.frmPagcob()`; if `servicio` equals `"TRANSQUICK"` (trailing blanks ignored) and
+   `iFrmPagcobSpi != null` then `frmPagcob = iFrmPagcobSpi` for **everything after**: the first
+   commission command, the exit-B movement and `Continue.frmPagcob` (1500-1502, RULE-025).
+2. `valorTarifa = iValorTarifa`; if `servicio` equals `"TRANSBIMO"` then `valorTarifa = valorComision`
+   (the normalized one; a null `valorComision` gives a null tariff) (1506-1508, RULE-001).
+3. **First commission** (1512-1600), only if `valorComision > 0` (null or 0 skips the whole block):
+   `CommissionCommand(sSsn, sSrv, sUser, terminal, sOfi, iAplcobis, iSpName, iFechaProceso, iCanal,
+   iEmpresa, iProducto, servicio, iTipoProceso, iOrden, valorComision, cadena, iTarjeta, frmPagcob,
+   iMonDebito, iTipctaEmp, iNumctaEmp, "COBRO DE COMISION", iRefProv, iTipoPagcob, iPaisCta,
+   iCodBancoCta, iNemEmp, iLocalidadOrden, null, null, iOrdenEmpresa, iTipoReferencia, null /*tipoafec*/,
+   "sp_debito_empresa", 0, valorTarifa, iValorComisionCue, iValorTarifaEfe, iValorComisionEfe,
+   iValorTarifaChe, iValorComisionChe)`. RULE-013, RULE-039.
+4. **Exit B** (1606-1700, REF44): if `returnCode != 0` **or** the port threw `AsePortException`
+   **or** `oError != 0`: `oError` is the procedure's output (0 after a throw or when it returned
+   0 with a non-zero return value); `tx.rollback()` (the transaction is always open here); then
+   `movements.record(MovementCommand(sUser, terminal, sOfi, trn, iTipoProceso, iEmpresa, iProducto,
+   iOrden, iCanal, causal, "X", oError, frmPagcob, iMonDebito, valorComision, "1", iFechaProceso,
+   "COBRO DE COMISION", 0, servicio, iTipoPagcob, iPaisCta, iCodBancoCta, iTipctaEmp, iNumctaEmp,
+   iValorOrdenado, iNemEmp, iLocalidadOrden, null, null, iOrdenEmpresa, comision, tranNcnd))`
+   **outside any transaction** (autocommit); its return value is ignored; return `ExitB(oError)`.
+   The service returns `DebitResult(oError, oError, null)` with **no commit** and **no sp_cerror** in
+   either aplcobis mode. When `oError == 0` (A14) the result is `DebitResult(0, 0, null)` after
+   everything was rolled back. Committed state: the debit write and the Phase 1 'P' movement are
+   gone; only the 'X' movement survives. `numError` (122003 or `oError`) is computed and unused.
+5. Lines 1716-1730 (`if @w_cod_errord != 0 ... commit ... return`) are unreachable: a non-zero
+   `oError` always took exit B. Pinned as "a failed first commission never commits".
+6. **Second, SWIFT commission** (1742-1836), only if `isnull(iValor2Swift, 0) > 0` and the trimmed
+   `servicio` equals `"TRANSWIFT"`: same command shape with `iValorComision = iValor2Swift`,
+   `iReferencia = request.iReferencia()` (not the literal), `iTipoafec = "16"`,
+   `iValorTarifa = iValor2Swift`, the five other REF33 fields `null`, `iCadena = cadena`,
+   `iFrmPagcob = frmPagcob`, same savepoint and `iSecuencial 0`. RULE-016.
+7. Its failure (`returnCode != 0` or throw or `oError != 0`): `numError = oError != 0 ? oError :
+   122003`, return `LblError(numError)` -> exit C of section 4 step 18 (full rollback; aplcobis `'S'`:
+   `sp_cerror(iSpName, numError)` and `DebitResult(numError, 0, null)`; else
+   `DebitResult(0, numError, null)`). No movement is written by this procedure for that failure.
+   Lines 1844-1854 are unreachable: pinned as "a failed SWIFT commission never commits". RULE-017.
+8. Happy path: `Continue(frmPagcob)`; the service runs the order-header step and commits. Both
+   commission writes survive the commit.
+
+### Test doubles
+
+`FakeAseSession` implements `CommissionPort`: `commission(returnCode, oError)` scripts the first
+call, `secondCommission(returnCode, oError)` the SWIFT call (recognised by `iTipoafec = "16"`),
+`commissionThrows()` / `secondCommissionThrows()` raise `AsePortException`; every call records a
+write `"sp_grb_comision"` (the procedure records its own movement) so the exit-B rollback is seen
+to discard it. `service()` wires `new CommissionDebits(session, session, session)` behind a logging
+`CommissionStep` that still records `"commissionStep"` and the `CommissionContext`.

@@ -1,0 +1,164 @@
+{
+  "_comment": "Phase 2 golden cases for sp_debcred_empresa: the commission blocks B10/B11 (lines 1496-1856) and exit B. Expected values are the LEGACY behavior read from legacy/debcred/sp_debcred_empresa.sp (spec-based; no ASE available, brief section 7 A4). Same schema as phase1-cases.json plus the optional inputs comision, valorComision, valor2Swift, codSwift, frmPagcobSpi, commissionReturnCode, commissionOError, secondCommissionReturnCode, secondCommissionOError, and the optional expected 'movementStatuses' (one entry per sp_grb_mov_y_frmpgo call, in order) used when exit B writes a second movement. 'exit' is A, B (commission failed: full rollback, 'X' movement in autocommit, code as return and o_error, no commit), C or OK. Fake data only.",
+  "cases": [
+    {
+      "name": "type 3 ROLPAGO with separate commission 2.00, both writes committed",
+      "rules": ["RULE-013", "RULE-009"],
+      "accountType": 3, "service": "ROLPAGO", "aplcobis": "N", "company": 500,
+      "comision": "1.50", "valorComision": "2.00",
+      "accountingReturnCode": 0, "debitReturnCode": 0, "movementReturnCode": 0,
+      "commissionReturnCode": 0, "commissionOError": 0,
+      "expected": { "returnCode": 0, "oError": 0, "exit": "OK", "begins": 1, "commits": 1, "rollbacks": 0,
+                    "movementStatus": "P", "committed": ["sp_ndc_ahcc", "sp_grb_mov_y_frmpgo", "sp_grb_comision"], "cerror": false }
+    },
+    {
+      "name": "bundled 2.50 moved to the separate commission (RULE-027) is charged",
+      "rules": ["RULE-013", "RULE-027"],
+      "accountType": 3, "service": "ROLPAGO", "aplcobis": "N", "company": 500,
+      "comision": "2.50", "valorComision": "0",
+      "accountingReturnCode": 0, "debitReturnCode": 0, "movementReturnCode": 0,
+      "commissionReturnCode": 0, "commissionOError": 0,
+      "expected": { "returnCode": 0, "oError": 0, "exit": "OK", "begins": 1, "commits": 1, "rollbacks": 0,
+                    "movementStatus": "P", "committed": ["sp_ndc_ahcc", "sp_grb_mov_y_frmpgo", "sp_grb_comision"], "cerror": false }
+    },
+    {
+      "name": "commission fails with o_error 122010, not COBIS (exit B)",
+      "rules": ["RULE-013"],
+      "accountType": 3, "service": "ROLPAGO", "aplcobis": "N", "company": 500,
+      "comision": "1.50", "valorComision": "2.00",
+      "accountingReturnCode": 0, "debitReturnCode": 0, "movementReturnCode": 0,
+      "commissionReturnCode": 0, "commissionOError": 122010,
+      "expected": { "returnCode": 122010, "oError": 122010, "exit": "B", "begins": 1, "commits": 0, "rollbacks": 1,
+                    "movementStatuses": ["P", "X"], "committed": ["sp_grb_mov_y_frmpgo"], "cerror": false }
+    },
+    {
+      "name": "commission fails with o_error 122010, COBIS (exit B, same convention, no sp_cerror)",
+      "rules": ["RULE-013"],
+      "accountType": 3, "service": "ROLPAGO", "aplcobis": "S", "company": 500,
+      "comision": "1.50", "valorComision": "2.00",
+      "accountingReturnCode": 0, "debitReturnCode": 0, "movementReturnCode": 0,
+      "commissionReturnCode": 0, "commissionOError": 122010,
+      "expected": { "returnCode": 122010, "oError": 122010, "exit": "B", "begins": 1, "commits": 0, "rollbacks": 1,
+                    "movementStatuses": ["P", "X"], "committed": ["sp_grb_mov_y_frmpgo"], "cerror": false }
+    },
+    {
+      "name": "commission fails by return value only, o_error 0 (A14: 0/0 after full rollback, exit B)",
+      "rules": ["RULE-013"],
+      "accountType": 3, "service": "ROLPAGO", "aplcobis": "N", "company": 500,
+      "comision": "1.50", "valorComision": "2.00",
+      "accountingReturnCode": 0, "debitReturnCode": 0, "movementReturnCode": 0,
+      "commissionReturnCode": 1, "commissionOError": 0,
+      "expected": { "returnCode": 0, "oError": 0, "exit": "B", "begins": 1, "commits": 0, "rollbacks": 1,
+                    "movementStatuses": ["P", "X"], "committed": ["sp_grb_mov_y_frmpgo"], "cerror": false }
+    },
+    {
+      "name": "type 12 virtual, commission fails 122010 (exit B, virtual write gone)",
+      "rules": ["RULE-013", "RULE-009"],
+      "accountType": 12, "service": "ROLPAGO", "aplcobis": "N", "company": 500,
+      "comision": "0", "valorComision": "2.00",
+      "accountingReturnCode": 0, "debitReturnCode": 0, "movementReturnCode": 0,
+      "commissionReturnCode": 0, "commissionOError": 122010,
+      "expected": { "returnCode": 122010, "oError": 122010, "exit": "B", "begins": 1, "commits": 0, "rollbacks": 1,
+                    "movementStatuses": ["P", "X"], "committed": ["sp_grb_mov_y_frmpgo"], "cerror": false }
+    },
+    {
+      "name": "type 9 ledger, commission fails 122010 (exit B, ledger write gone)",
+      "rules": ["RULE-013", "RULE-022"],
+      "accountType": 9, "service": "ROLPAGO", "aplcobis": "N", "company": 500,
+      "comision": "0", "valorComision": "2.00",
+      "accountingReturnCode": 0, "debitReturnCode": 0, "movementReturnCode": 0,
+      "commissionReturnCode": 0, "commissionOError": 122010,
+      "expected": { "returnCode": 122010, "oError": 122010, "exit": "B", "begins": 1, "commits": 0, "rollbacks": 1,
+                    "movementStatuses": ["P", "X"], "committed": ["sp_grb_mov_y_frmpgo"], "cerror": false }
+    },
+    {
+      "name": "TRANSQUICK with SPI form, commission charged (swap on the commission only)",
+      "rules": ["RULE-025", "RULE-013"],
+      "accountType": 3, "service": "TRANSQUICK", "aplcobis": "N", "company": 500,
+      "comision": "0", "valorComision": "2.00", "frmPagcobSpi": "COB",
+      "accountingReturnCode": 0, "debitReturnCode": 0, "movementReturnCode": 0,
+      "commissionReturnCode": 0, "commissionOError": 0,
+      "expected": { "returnCode": 0, "oError": 0, "exit": "OK", "begins": 1, "commits": 1, "rollbacks": 0,
+                    "movementStatus": "P", "committed": ["sp_ndc_ahcc", "sp_grb_mov_y_frmpgo", "sp_grb_comision"], "cerror": false }
+    },
+    {
+      "name": "TRANSBIMO with separate commission 2.50 (tariff forced to 2.50)",
+      "rules": ["RULE-001", "RULE-013"],
+      "accountType": 3, "service": "TRANSBIMO", "aplcobis": "N", "company": 500,
+      "comision": "0", "valorComision": "2.50",
+      "accountingReturnCode": 0, "debitReturnCode": 0, "movementReturnCode": 0,
+      "commissionReturnCode": 0, "commissionOError": 0,
+      "expected": { "returnCode": 0, "oError": 0, "exit": "OK", "begins": 1, "commits": 1, "rollbacks": 0,
+                    "movementStatus": "P", "committed": ["sp_ndc_ahcc", "sp_grb_mov_y_frmpgo", "sp_grb_comision"], "cerror": false }
+    },
+    {
+      "name": "TRANSWIFT: separate commission 2.00 and SWIFT value 15.00, both charged",
+      "rules": ["RULE-016", "RULE-013"],
+      "accountType": 3, "service": "TRANSWIFT", "aplcobis": "N", "company": 500,
+      "comision": "0", "valorComision": "2.00", "valor2Swift": "15.00", "codSwift": "ABCDEC2X",
+      "accountingReturnCode": 0, "debitReturnCode": 0, "movementReturnCode": 0,
+      "commissionReturnCode": 0, "commissionOError": 0, "secondCommissionReturnCode": 0, "secondCommissionOError": 0,
+      "expected": { "returnCode": 0, "oError": 0, "exit": "OK", "begins": 1, "commits": 1, "rollbacks": 0,
+                    "movementStatus": "P", "committed": ["sp_ndc_ahcc", "sp_grb_mov_y_frmpgo", "sp_grb_comision", "sp_grb_comision"], "cerror": false }
+    },
+    {
+      "name": "TRANSWIFT: SWIFT value only (no separate commission), one SWIFT charge",
+      "rules": ["RULE-016"],
+      "accountType": 3, "service": "TRANSWIFT", "aplcobis": "N", "company": 500,
+      "comision": "0", "valorComision": "0", "valor2Swift": "15.00", "codSwift": "ABCDEC2X",
+      "accountingReturnCode": 0, "debitReturnCode": 0, "movementReturnCode": 0,
+      "secondCommissionReturnCode": 0, "secondCommissionOError": 0,
+      "expected": { "returnCode": 0, "oError": 0, "exit": "OK", "begins": 1, "commits": 1, "rollbacks": 0,
+                    "movementStatus": "P", "committed": ["sp_ndc_ahcc", "sp_grb_mov_y_frmpgo", "sp_grb_comision"], "cerror": false }
+    },
+    {
+      "name": "TRANSWIFT: SWIFT commission fails 122010, not COBIS (exit C, nothing committed)",
+      "rules": ["RULE-017", "RULE-028"],
+      "accountType": 3, "service": "TRANSWIFT", "aplcobis": "N", "company": 500,
+      "comision": "0", "valorComision": "2.00", "valor2Swift": "15.00", "codSwift": "ABCDEC2X",
+      "accountingReturnCode": 0, "debitReturnCode": 0, "movementReturnCode": 0,
+      "commissionReturnCode": 0, "commissionOError": 0, "secondCommissionReturnCode": 0, "secondCommissionOError": 122010,
+      "expected": { "returnCode": 0, "oError": 122010, "exit": "C", "begins": 1, "commits": 0, "rollbacks": 1,
+                    "movementStatus": "P", "committed": [], "cerror": false }
+    },
+    {
+      "name": "TRANSWIFT: SWIFT commission fails 122010, COBIS (exit C, sp_cerror, code returned, o_error 0)",
+      "rules": ["RULE-017", "RULE-028"],
+      "accountType": 3, "service": "TRANSWIFT", "aplcobis": "S", "company": 500,
+      "comision": "0", "valorComision": "2.00", "valor2Swift": "15.00", "codSwift": "ABCDEC2X",
+      "accountingReturnCode": 0, "debitReturnCode": 0, "movementReturnCode": 0,
+      "commissionReturnCode": 0, "commissionOError": 0, "secondCommissionReturnCode": 0, "secondCommissionOError": 122010,
+      "expected": { "returnCode": 122010, "oError": 0, "exit": "C", "begins": 1, "commits": 0, "rollbacks": 1,
+                    "movementStatus": "P", "committed": [], "cerror": true }
+    },
+    {
+      "name": "TRANSWIFT: SWIFT commission fails by return value only -> 122003 (exit C)",
+      "rules": ["RULE-017"],
+      "accountType": 3, "service": "TRANSWIFT", "aplcobis": "N", "company": 500,
+      "comision": "0", "valorComision": "0", "valor2Swift": "15.00", "codSwift": "ABCDEC2X",
+      "accountingReturnCode": 0, "debitReturnCode": 0, "movementReturnCode": 0,
+      "secondCommissionReturnCode": 1, "secondCommissionOError": 0,
+      "expected": { "returnCode": 0, "oError": 122003, "exit": "C", "begins": 1, "commits": 0, "rollbacks": 1,
+                    "movementStatus": "P", "committed": [], "cerror": false }
+    },
+    {
+      "name": "ROLPAGO with a SWIFT value 15.00 and no separate commission: nothing is charged",
+      "rules": ["RULE-016", "RULE-013"],
+      "accountType": 3, "service": "ROLPAGO", "aplcobis": "N", "company": 500,
+      "comision": "0", "valorComision": "0", "valor2Swift": "15.00",
+      "accountingReturnCode": 0, "debitReturnCode": 0, "movementReturnCode": 0,
+      "expected": { "returnCode": 0, "oError": 0, "exit": "OK", "begins": 1, "commits": 1, "rollbacks": 0,
+                    "movementStatus": "P", "committed": ["sp_ndc_ahcc", "sp_grb_mov_y_frmpgo"], "cerror": false }
+    },
+    {
+      "name": "debit fails 201045 with a separate commission 2.00: exit A, the commission is never attempted",
+      "rules": ["RULE-013", "RULE-012"],
+      "accountType": 3, "service": "ROLPAGO", "aplcobis": "N", "company": 500,
+      "comision": "0", "valorComision": "2.00",
+      "accountingReturnCode": 0, "debitReturnCode": 201045, "movementReturnCode": 0,
+      "commissionReturnCode": 0, "commissionOError": 122010,
+      "expected": { "returnCode": 201045, "oError": 201045, "exit": "A", "begins": 1, "commits": 1, "rollbacks": 0,
+                    "movementStatus": "X", "committed": ["sp_grb_mov_y_frmpgo"], "cerror": false }
+    }
+  ]
+}

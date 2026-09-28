@@ -18,10 +18,10 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 import com.nexti.debcred.AsePortException;
-import com.nexti.debcred.CommissionStep;
+import com.nexti.debcred.CommissionDebits;
+import com.nexti.debcred.DebitCompanyAccountService;
+import com.nexti.debcred.DebitFlow;
 import com.nexti.debcred.NotificationOutcome;
-import com.nexti.debcred.NotificationStep;
-import com.nexti.debcred.OrderHeaderStep;
 import com.nexti.debcred.ase.AseSessionFactory.SessionOpener;
 import com.nexti.debcred.ase.AseUnavailableException;
 import com.nexti.debcred.support.FakeAseSession;
@@ -53,18 +53,9 @@ class DebitControllerWebTest {
         }
 
         @Bean
-        NotificationStep notificationStep() {
-            return context -> NotificationOutcome.notConfigured();
-        }
-
-        @Bean
-        CommissionStep commissionStep() {
-            return context -> 0;
-        }
-
-        @Bean
-        OrderHeaderStep orderHeaderStep() {
-            return context -> 0;
+        DebitFlow debitFlow() {
+            return ase -> new DebitCompanyAccountService(ase, context -> NotificationOutcome.notConfigured(),
+                    new CommissionDebits(ase, ase, ase), context -> 0);
         }
     }
 

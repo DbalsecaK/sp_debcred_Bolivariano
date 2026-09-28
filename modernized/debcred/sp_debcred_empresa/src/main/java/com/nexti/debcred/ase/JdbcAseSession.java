@@ -19,6 +19,8 @@ import com.nexti.debcred.AccountingConfiguration;
 import com.nexti.debcred.AccountingConfigurationQuery;
 import com.nexti.debcred.AsePortException;
 import com.nexti.debcred.AseSession;
+import com.nexti.debcred.CommissionCommand;
+import com.nexti.debcred.CommissionResult;
 import com.nexti.debcred.CommissionTariffQuery;
 import com.nexti.debcred.CommissionTariffResult;
 import com.nexti.debcred.DebitNoteCommand;
@@ -274,6 +276,67 @@ public final class JdbcAseSession implements AseSession {
             cs.setBigDecimal(33, c.iValorComision());
             cs.setObject(34, c.iTranNcnd(), Types.INTEGER);
         }, cs -> new MovementResult(cs.getInt(1)));
+    }
+
+    @Override
+    public CommissionResult charge(CommissionCommand c) {
+        // sp_grb_comision, positional in the declaration order ProcedureSignatureCheck verifies at startup.
+        // First call (1518-1594): 32 fixed, savepoint, secuencial, @o_error, the six REF33 fields -> last 42.
+        // SWIFT call (1746-1820): 32 fixed, @i_tipoafec, savepoint, secuencial, @o_error, @i_valor_tarifa -> last 38;
+        // the five other REF33 fields are omitted, as the legacy omits them (review Phase 2 H1).
+        boolean swift = c.iTipoafec() != null;
+        int last = swift ? 38 : 42;
+        int oErrorIndex = swift ? 37 : 36;
+        return call(cobis + "..sp_grb_comision", last, cs -> {
+            int i = 2;
+            cs.setObject(i++, c.sSsn(), Types.INTEGER);
+            cs.setString(i++, c.sSrv());
+            cs.setString(i++, c.sUser());
+            cs.setString(i++, c.sTerm());
+            cs.setObject(i++, c.sOfi(), Types.SMALLINT);
+            cs.setString(i++, c.iAplcobis());
+            cs.setString(i++, c.iSpName());
+            cs.setTimestamp(i++, timestamp(c.iFechaProceso()));
+            cs.setString(i++, c.iCanalComision());
+            cs.setObject(i++, c.iEmpresa(), Types.INTEGER);
+            cs.setObject(i++, c.iProducto(), Types.SMALLINT);
+            cs.setString(i++, c.iServicio());
+            cs.setString(i++, c.iTipoProceso());
+            cs.setObject(i++, c.iOrdenBanco(), Types.INTEGER);
+            cs.setBigDecimal(i++, c.iValorComision());
+            cs.setString(i++, c.iCadena());
+            cs.setString(i++, c.iTarjeta());
+            cs.setString(i++, c.iFrmPagcob());
+            cs.setObject(i++, c.iMoneda(), Types.SMALLINT);
+            cs.setObject(i++, c.iTipctaEmp(), Types.SMALLINT);
+            cs.setString(i++, c.iNumctaEmp());
+            cs.setString(i++, c.iReferencia());
+            cs.setString(i++, c.iDetalleRef());
+            cs.setString(i++, c.iTipoPagcob());
+            cs.setObject(i++, c.iPaisCta(), Types.SMALLINT);
+            cs.setObject(i++, c.iCodBancoCta(), Types.SMALLINT);
+            cs.setString(i++, c.iNemOrdenante());
+            cs.setObject(i++, c.iLocalidadPagcob(), Types.INTEGER);
+            cs.setString(i++, c.iNombreCuenta());
+            cs.setString(i++, c.iNombreBeneficiario());
+            cs.setObject(i++, c.iOrdenEmpresa(), Types.INTEGER);
+            cs.setString(i++, c.iTipoHorario());
+            if (swift) {
+                cs.setString(i++, c.iTipoafec());
+            }
+            cs.setString(i++, c.iSavepoint());
+            cs.setInt(i++, c.iSecuencial());
+            cs.registerOutParameter(i++, Types.INTEGER);      // @o_error
+            cs.setBigDecimal(i++, c.iValorTarifa());
+            if (swift) {
+                return;
+            }
+            cs.setBigDecimal(i++, c.iValorComisionCue());
+            cs.setBigDecimal(i++, c.iValorTarifaEfe());
+            cs.setBigDecimal(i++, c.iValorComisionEfe());
+            cs.setBigDecimal(i++, c.iValorTarifaChe());
+            cs.setBigDecimal(i, c.iValorComisionChe());
+        }, cs -> new CommissionResult(cs.getInt(1), (Integer) cs.getObject(oErrorIndex)));
     }
 
     @Override

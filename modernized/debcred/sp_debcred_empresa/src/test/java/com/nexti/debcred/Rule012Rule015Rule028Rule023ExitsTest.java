@@ -177,7 +177,8 @@ class Rule012Rule015Rule028Rule023ExitsTest {
         assertThat(header.frmPagcobDeb()).as("@i_frm_pagcob_deb defaults to @i_frm_pagcob (line 262)").isEqualTo("CUE");
         assertThat(header.actTotord()).isEqualTo("S");
         assertThat(header.codErrord()).isEqualTo(0);
-        assertThat(ase.calls()).endsWith("sp_grb_mov_y_frmpgo", "commissionStep", "orderHeaderStep", "commit");
+        // Phase 2: the 2.50 moved to the separate commission is charged inside the step (line 1518)
+        assertThat(ase.calls()).endsWith("sp_grb_mov_y_frmpgo", "commissionStep", "sp_grb_comision", "orderHeaderStep", "commit");
     }
 
     @Test

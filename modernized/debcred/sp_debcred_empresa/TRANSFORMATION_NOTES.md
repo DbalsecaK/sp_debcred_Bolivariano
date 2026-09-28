@@ -8,7 +8,7 @@ Date: 2026-09-27. Legacy: `legacy/debcred/sp_debcred_empresa.sp` (Sybase ASE / C
 
 Blocks B0-B6, B8, B9, B14 and B15 of the map (`analysis/debcred/topology.json`): the signature, commission normalization, concept and accounting configuration, `begin tran` + savepoint, the debit by account type (3/4 via `sp_ndc_ahcc`, 12 via `sp_vi_ndc_automatica`, 9 via `sp_graba_tran_servicio`), the movement record, and the three exits. First slice, as the brief names it: account type 3, happy path and debit failure (exit A).
 
-Out of scope, present as steps that later phases fill in: notifications B7 (Phase 4, stub "not configured"), commissions B10-B11 (Phase 2, stub returns 0), order-header update B12 (Phase 3, stub returns 0).
+Out of scope in Phase 1, present as steps that later phases fill in: notifications B7 (Phase 4, stub "not configured"), commissions B10-B11 (**done in Phase 2**, see below), order-header update B12 (Phase 3, stub returns 0).
 
 ## Mapping (legacy lines -> target)
 
@@ -92,17 +92,50 @@ Not applied, listed for later:
 |---|---|---|
 | M2 | Positional `{? = call ...}` binding assumes the procedures' parameter order of `DATA_OBJECTS.md`. Bind by name (jTDS supports it) or check `DatabaseMetaData.getProcedureColumns` at startup. | As soon as the bank's ASE or the procedures' source is available (§7 A4/A5). |
 | M4 | Pool sizing, timeouts, validation query, actuator health/metrics for the ASE datasource. | Phase 5 (deployment configuration). |
-| M6 | No test of `JdbcAseSession` SQL text and parameter indexes (a Mockito `Connection` test). | Phase 2, together with the exit-B adapter work. |
+| M6 | No test of `JdbcAseSession` SQL text and parameter indexes (a Mockito `Connection` test). | **Done in Phase 2** for `sp_grb_comision`, the transaction statements and rollback-on-close (`JdbcAseSessionTest`); index tests for the Phase 1 procedures remain open (Phase 5). |
 | L2 | `cobisDatabase` validated at first use, not at startup. | Phase 5. |
 | L5 | (done: the controller is no longer profiled) | — |
 
 ## Follow-ups for the next phases
 
-1. **Phase 2 (commissions, B10-B11):** implement `CommissionStep` with `sp_grb_comision` and exit B exactly as the legacy: full `rollback tran`, then `sp_grb_mov_y_frmpgo` outside any transaction, return without commit (1606-1700). `FakeAseSession` already models autocommit writes outside a transaction. Pin that 1716-1730 and 1844-1854 are unreachable.
+1. ~~Phase 2 (commissions, B10-B11)~~: done, see "Phase 2" below.
 2. **Phase 3 (order header, B12):** `OrderHeaderStep` over `bp_total_orden` with the history fallback; note `@wRowdbBiz` is stale when `@i_opcion` is outside `01-03` (RULE-014 quirk, preserved).
 3. **Phase 4 (notifications, B7):** replace the stub; `NotificationOutcome.configured = true` must overwrite the debit code (1248) and, for TRANSCLI/TARJCRED/COMEXT, the debit value (884-886).
 4. **Before any real ASE run:** confirm D1-7 (transaction mode), M2 (parameter order), and whether the COBIS callers open their own transaction (brief §7 A1, unanswered).
 5. `KNOWN_DIFFERENCES.md` (Phase 5): D1-2 and D1-3.
+
+## Phase 2: commissions (B10-B11, legacy lines 1496-1856), 2026-09-27
+
+Brief Phase 2, entry criteria met (Phase 1 exit criteria and section 8 re-signed by David Balseca; section 7 A5 assumed contract of `sp_grb_comision`). Plan approved at the gate, with section 7 **A14** ruled: an exit B whose failure leaves `@o_error = 0` returns 0 / 0 after the full rollback (parity).
+
+| Behavior | Legacy `sp_debcred_empresa.sp` | Target | Rules |
+|---|---|---|---|
+| TRANSQUICK + SPI form swaps the working payment form for the rest | 1498-1502 | `CommissionDebits.apply` | RULE-025 |
+| TRANSBIMO: tariff = separate commission | 1504-1508 | `CommissionDebits.apply` | RULE-001 |
+| Separate commission via `sp_grb_comision`, `'COBRO DE COMISION'`, six REF33 fields, savepoint name | 1508-1594 | `separateCommission`, `CommissionPort`, `JdbcAseSession.charge` | RULE-013, RULE-039 |
+| **Exit B**: full `rollback tran`, failed-commission movement `'X'` in autocommit (result ignored), return `@o_error` without commit; 0 / 0 when `@o_error` is 0 | 1606-1700 | `CommissionDebits.exitB`, `CommissionOutcome.ExitB`, service switch | RULE-013 (P0), A14 |
+| Second SWIFT commission: request reference, `@i_tipoafec '16'`, tariff = `@i_valor2_swift` | 1716-1794 | `swiftCommission` | RULE-016 |
+| SWIFT failure -> `lbl_error` with `@o_error` or 122003 | 1796-1808 | `CommissionOutcome.LblError`, `errorExit` | RULE-017 |
+| The debit's working values the block reads (`@w_cadena`, SPI-replaced `@i_servicio`, blank `@s_term`, `@s_ssn ?? 0`, `@w_tran_ncnd`) | 1520-1780 | `CommissionContext`, `Posting.Posted.cadena` | - |
+
+**Not migrated:** the `if @w_cod_errord != 0 ... commit tran ... return` remnants after REF34/REF44 are unreachable: the check just above already left through exit B or `lbl_error`. Pinned by tests that assert no commit ever happens on a commission failure (`Rule013ExitBTest.rule013_unreachableCommitOnCommissionError`, `Rule016Rule017SecondSwiftCommissionTest`).
+
+**Deliberate deviations added:** none that change a business outcome. A failure writing the exit-B movement (`AsePortException`) is caught, logged and ignored, as the legacy ignores both `@w_return` and `@@error` at that write (review M1, parity).
+
+**Proof:** **184 tests, 0 failures, 0 skipped** (`mvn -o test` from clean): Phase 1's 115, 43 commission characterization tests, 16 more golden cases (`equivalence cases executed: 26 of 26`) and 10 adapter tests. Two Phase 1 assertions were corrected by one line each: they had pinned the Phase 1 stub (no `sp_grb_comision` call) for an input whose bundled commission the legacy normalizes and charges. **Canaries** (XML under `analysis/debcred/equivalence/canary/sp_debcred_empresa/`): exit B rolling back only to the savepoint -> **14 failed**; SWIFT failure always 122003 -> **6 failed**; the adapter reading `@o_error` one slot off -> **1 failed**. Equivalence remains spec-based (no ASE): ceiling PARTLY PROVEN.
+
+**Architecture review (Phase 2):**
+
+| # | Finding | Change |
+|---|---|---|
+| H1 | Positional `sp_grb_comision` call with variable arity; the SWIFT call bound five REF33 slots the legacy omits | The SWIFT call binds exactly the legacy's arguments (38 placeholders); `ProcedureSignatureCheck` verifies the declared parameter order at startup under the `ase` profile and refuses to start on a mismatch. Named binding stays an option once an ASE confirms jTDS behavior. |
+| H2 | No test of the JDBC adapter (Phase 1 M6) | `JdbcAseSessionTest` (Mockito): call text, placeholder counts, `@o_error` index for both shapes, result-set draining, literal transaction statements in autocommit, rollback-on-close, identifier guard, the startup check |
+| H3 | Exit B silent in the log | WARN with order, company, service, return code, `@o_error` and the `@@error` SQLState/code; ERROR when the failure movement cannot be written |
+| M1 | A failure writing the exit-B movement propagated as 502 | Caught and ignored (parity), logged at ERROR |
+| M2 | Per-request steps assembled in the controller | `DebitFlow` built by `DebitFlowConfiguration`; the controller only opens the session and delegates. Phases 3 and 4 plug their steps in there. |
+| M3, L1, L2 | 11-argument builder; wrong line numbers; two idioms for `> 0` | `separateCommission` / `swiftCommission` factories; Javadoc cites 1606 and 1824; `isPositive` everywhere |
+| L3 | `Continue(frmPagcob)` payload unused | Kept: it is part of the contract the tests pin; B12 reads `@i_frm_pagcob_deb`, so Phase 3 may drop it with the contract |
+| L4 | `Posting.Posted` trailing nulls | Deferred to Phase 4, when the record changes again |
 
 ## Side by side: exit A (debit failed), legacy 1332-1342 and 1480-1492 vs the service
 

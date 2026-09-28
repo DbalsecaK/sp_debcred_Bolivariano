@@ -22,7 +22,8 @@ import java.util.Objects;
  *       (RULE-028).</li>
  *   <li><b>Success</b> (2130-2136): commit, return 0.</li>
  * </ul>
- * Exit B (a failed commission, lines 1606-1700) belongs to Phase 2's {@link CommissionStep}.
+ * <b>Exit B</b> (a failed commission, lines 1606-1700) is decided by {@link CommissionDebits}: full rollback,
+ * failure movement in autocommit, return without commit.
  */
 public class DebitCompanyAccountService {
 
@@ -168,12 +169,20 @@ public class DebitCompanyAccountService {
             return new DebitResult(posted.codErrord(), posted.codErrord(), null);
         }
 
-        // B10-B12 (Phase 2 and 3 steps), then success (2130-2136)
-        commission.apply(new CommissionContext(request, commissions.comision(), commissions.valorComision(),
-                request.iFrmPagcob(), posted.trn(), posted.causal(), SAVEPOINT));
-        orderHeader.update(new OrderHeaderContext(request, servicio, frmPagcobDeb, actTotord, posted.codErrord()));
-        tx.commit();
-        return new DebitResult(0, 0, null);
+        // B10-B11 (1496-1856): the commissions decide how the debit ends
+        CommissionOutcome outcome = commission.apply(new CommissionContext(request, commissions.comision(),
+                commissions.valorComision(), request.iFrmPagcob(), posted.trn(), posted.causal(), SAVEPOINT,
+                posted.tranNcnd(), posted.cadena(), servicio, terminal, sSsn));
+        return switch (outcome) {
+            case CommissionOutcome.ExitB b -> new DebitResult(b.oError(), b.oError(), null);       // 1698-1700, no commit
+            case CommissionOutcome.LblError e -> errorExit(request, e.numError(), true);          // 1834
+            case CommissionOutcome.Continue c -> {
+                // B12 (Phase 3 step), then success (2130-2136)
+                orderHeader.update(new OrderHeaderContext(request, servicio, frmPagcobDeb, actTotord, posted.codErrord()));
+                tx.commit();
+                yield new DebitResult(0, 0, null);
+            }
+        };
     }
 
     /** {@code @w_batch} (176-178): {@code 'S'} online, {@code 'N'} batch, anything else NULL. */
@@ -205,13 +214,13 @@ public class DebitCompanyAccountService {
                          Boolean batch, CommissionBreakdown commissions) {
         Integer type = r.iTipctaEmp();
         if (type == null) {
-            return new Posting.Posted(UNSUPPORTED_ACCOUNT_TYPE, null, r.iValorDebito(), trn, causal);   // 1316
+            return new Posting.Posted(UNSUPPORTED_ACCOUNT_TYPE, null, r.iValorDebito(), trn, causal, null);   // 1316
         }
         return switch (type) {
             case CURRENT_ACCOUNT, SAVINGS_ACCOUNT, VIRTUAL_ACCOUNT ->
                     postDebitNote(r, sSsn, terminal, moneda, trn, causal, batch, commissions);
             case ACCOUNTING_ACCOUNT -> postLedgerDebit(r, terminal, trn, causal);
-            default -> new Posting.Posted(UNSUPPORTED_ACCOUNT_TYPE, null, r.iValorDebito(), trn, causal);
+            default -> new Posting.Posted(UNSUPPORTED_ACCOUNT_TYPE, null, r.iValorDebito(), trn, causal, null);
         };
     }
 
@@ -272,7 +281,7 @@ public class DebitCompanyAccountService {
                 }
             }
         }
-        return new Posting.Posted(codErrord, tranNcnd, valorDebito, trn, causal);
+        return new Posting.Posted(codErrord, tranNcnd, valorDebito, trn, causal, cadena);
     }
 
     /** Block B8 (1260-1300): an accounting account; company 1295 on SPI books the amount as balance. RULE-022. */
@@ -289,7 +298,7 @@ public class DebitCompanyAccountService {
         LedgerDebitResult result = ledgerDebit.debit(new LedgerDebitCommand(
                 r.sSrv(), r.sOfi(), null, r.sUser(), terminal, trn, r.iFechaProceso(), r.iRefProv(), r.iNumctaEmp(),
                 r.sOfi(), 1, r.iMonDebito(), causal, saldo, valor, 0, empresa, r.iOrden(), 0));
-        return new Posting.Posted(result.returnCode(), null, valorDebito, trn, causal);
+        return new Posting.Posted(result.returnCode(), null, valorDebito, trn, causal, null);
     }
 
     /** {@code WRITELOG}-equivalent movement record (1394-1460). */
@@ -322,8 +331,8 @@ public class DebitCompanyAccountService {
     /** What blocks B5-B8 leave for B9. */
     private sealed interface Posting {
 
-        /** The debit ran (or was refused with 122001): its code, sequence and the working values B9 needs. */
-        record Posted(int codErrord, Integer tranNcnd, BigDecimal valorDebito, Integer trn, String causal)
+        /** The debit ran (or was refused with 122001): its code, sequence and the working values B9-B11 need ({@code cadena} = {@code @w_cadena}). */
+        record Posted(int codErrord, Integer tranNcnd, BigDecimal valorDebito, Integer trn, String causal, String cadena)
                 implements Posting {
         }
 

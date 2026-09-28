@@ -6,12 +6,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.nexti.debcred.AseSession;
-import com.nexti.debcred.CommissionStep;
-import com.nexti.debcred.DebitCompanyAccountService;
+import com.nexti.debcred.DebitFlow;
 import com.nexti.debcred.DebitRequest;
 import com.nexti.debcred.DebitResult;
-import com.nexti.debcred.NotificationStep;
-import com.nexti.debcred.OrderHeaderStep;
 import com.nexti.debcred.ase.AseSessionFactory.SessionOpener;
 
 /**
@@ -25,22 +22,17 @@ import com.nexti.debcred.ase.AseSessionFactory.SessionOpener;
 public class DebitController {
 
     private final SessionOpener sessions;
-    private final NotificationStep notification;
-    private final CommissionStep commission;
-    private final OrderHeaderStep orderHeader;
+    private final DebitFlow flow;
 
-    public DebitController(SessionOpener sessions, NotificationStep notification, CommissionStep commission,
-                           OrderHeaderStep orderHeader) {
+    public DebitController(SessionOpener sessions, DebitFlow flow) {
         this.sessions = sessions;
-        this.notification = notification;
-        this.commission = commission;
-        this.orderHeader = orderHeader;
+        this.flow = flow;
     }
 
     @PostMapping
     public DebitResult debit(@RequestBody DebitRequest request) {
         try (AseSession ase = sessions.open()) {
-            return new DebitCompanyAccountService(ase, notification, commission, orderHeader).debit(request);
+            return flow.over(ase).debit(request);
         }
     }
 }

@@ -111,7 +111,8 @@ class Rule009Rule008Rule033Rule026DebitRoutingTest {
         assertThat(ase.onlyMovement().iTranNcnd()).isEqualTo(9002);
         // the movement keeps the request channel: only the virtual debit note is forced to SAT
         assertThat(ase.onlyMovement().iCanal()).isEqualTo("BNK");
-        assertThat(ase.committedProcedures()).containsExactly("sp_vi_ndc_automatica", "sp_grb_mov_y_frmpgo");
+        // Phase 2: the 2.50 moved to the separate commission (RULE-027) is charged by sp_grb_comision (line 1518)
+        assertThat(ase.committedProcedures()).containsExactly("sp_vi_ndc_automatica", "sp_grb_mov_y_frmpgo", "sp_grb_comision");
     }
 
     @Test
