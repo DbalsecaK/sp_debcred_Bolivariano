@@ -90,7 +90,7 @@ A person fills this in. Claude leaves it blank.
 | Name | David Balseca|
 | Role | SME |
 | Date | 27 sep 2026|
-| Decision accepted|
+| Decision | accepted|
 
 ## How each verdict is computed
 

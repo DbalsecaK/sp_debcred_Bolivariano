@@ -85,7 +85,7 @@ Exit criteria:
 - [x] The three exits are pinned by tests that assert the committed state: exit A (debit failed: savepoint rollback, error movement committed, code returned), exit C (`lbl_error`: full rollback, `sp_cerror` only when `@i_aplcobis='S'`, return code vs `@o_error` per RULE-028). *(2026-09-27: exits A and C pinned on committed state in Rule012Rule015Rule028Rule023ExitsTest and GoldenCasesTest; exit B belongs to Phase 2.)*
 - [x] The notification step is a stub that returns "not configured" and is proven to leave `@w_cod_errord` untouched, so Phase 4 can replace it without changing Phases 1–3. *(2026-09-27: NotificationStubTest, 8 tests.)*
 - [x] A canary (one deliberate break in the savepoint handling) turns tests red, recorded in `TRANSFORMATION_NOTES.md`. *(2026-09-27: savepoint rollback -> full rollback: 14 red; truncation DOWN -> HALF_UP: 3 red; XML under analysis/debcred/equivalence/canary/sp_debcred_empresa/.)*
-- [ ] `TRANSFORMATION_NOTES.md` records every fact the pilot learned about ASE transactions through JDBC, and this brief is regenerated or its §8 re-signed for Phases 2+.
+- [x] `TRANSFORMATION_NOTES.md` records every fact the pilot learned about ASE transactions through JDBC, and this brief is regenerated or its §8 re-signed for Phases 2+.
 
 #### Phase 2 — Commissions
 Command: /code-modernization:modernize-transform
@@ -93,7 +93,7 @@ Modules: B10, B11, sp:sp_grb_comision
 Scale: M
 Risk: High; (1) exit B (commission failed: full `rollback tran`, then `sp_grb_mov_y_frmpgo` written **outside** any transaction, return without commit, `:1622-1700`) is the hardest behavior to reproduce and the one most tempting to "fix" — mitigation: RULE-013 was confirmed as-is by the approver; the test asserts that after exit B the debit is gone, the error movement persists, and the order header is still `I`; (2) `sp_grb_comision` receives the savepoint name (`@i_savepoint`, `:1584`) and may roll back to it inside — mitigation: §7 A5 for its source, else the mock records whether the savepoint was passed.
 Entry criteria:
-- [ ] Phase 1 exit criteria met and the brief re-signed.
+- [x] Phase 1 exit criteria met and the brief re-signed.
 - [ ] §7 A5 for `sp_grb_comision`.
 Exit criteria:
 - [ ] Characterization tests pass for RULE-013, 017, 001, 023, and exit B is pinned by a test that asserts the final state of debit, movement and header.
