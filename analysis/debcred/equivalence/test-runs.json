@@ -1,0 +1,43 @@
+{
+  "date": "2026-09-27",
+  "legacy": {
+    "ran": false,
+    "how": "",
+    "why": "The legacy is a Sybase ASE / COBIS T-SQL stored procedure; no ASE (nor SQL Server) exists on this machine and the bank's test ASE is not reachable (PREFLIGHT 3b, brief section 7 A4). PostgreSQL in Docker is the target-side engine only and cannot run T-SQL. The proof is spec-based: expected values derived by hand from the cited legacy lines and BUSINESS_RULES.md; the ten called procedures are in-memory doubles with the assumed contracts of DATA_OBJECTS.md."
+  },
+  "leftOut": [
+    "Fresh-input check not run: the legacy cannot execute here, so no legacy output exists to compare against; the 10 golden cases in the module's test resources are development cases, not a legacy oracle.",
+    "Malformed records not tried for the same reason (INTENT.md asks for exact parity, quirks included, so they must be tried once the bank's test ASE is reachable)."
+  ],
+  "suites": [
+    {
+      "module": "sp_debcred_empresa",
+      "name": "unit and characterization tests (JUnit 5, jqwik, MockMvc)",
+      "command": "cd modernized/debcred/sp_debcred_empresa && rm -rf target .jqwik-database && ~/tools/apache-maven-3.9.9/bin/mvn -o test -Dmaven.test.failure.ignore=true",
+      "junit": ["modernized/debcred/sp_debcred_empresa/target/surefire-reports"],
+      "log": ["analysis/debcred/equivalence/sp_debcred_empresa.unit.test-output.txt"],
+      "skippedReason": "",
+      "note": "Phase 1 scope only (debit core, exits A and C); notifications, commissions and the order-header update are stubs by the brief's design, so their rules are not tested yet."
+    }
+  ],
+  "canaries": [
+    {
+      "module": "sp_debcred_empresa",
+      "change": "verify's own canary, in a scratch copy: lbl_error's mode test flipped from @i_aplcobis = 'S' to 'N' (RULE-028: which channel carries the error code)",
+      "junit": ["analysis/debcred/equivalence/canary/sp_debcred_empresa/verify-errorexit-mode"],
+      "log": []
+    },
+    {
+      "module": "sp_debcred_empresa",
+      "change": "transform's canary: rollback to the savepoint replaced by a full rollback (RULE-012 exit A)",
+      "junit": ["analysis/debcred/equivalence/canary/sp_debcred_empresa/savepoint"],
+      "log": []
+    },
+    {
+      "module": "sp_debcred_empresa",
+      "change": "transform's canary: commission count truncation DOWN changed to HALF_UP (RULE-002)",
+      "junit": ["analysis/debcred/equivalence/canary/sp_debcred_empresa/truncation"],
+      "log": []
+    }
+  ]
+}

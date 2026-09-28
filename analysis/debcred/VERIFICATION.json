@@ -1,0 +1,336 @@
+{
+  "v": 1,
+  "system": "debcred",
+  "generated": "2026-09-28 00:02 UTC",
+  "asked": "sp_debcred_empresa",
+  "rules": [
+    "PROVEN needs every check to pass: the six below, and for an uplift three more (7 to 9). NOT PROVEN when any check fails. PARTLY PROVEN when nothing failed but a check could not pass.",
+    "1. Tests ran: at least one test executed in a fresh run, none failed, none was skipped without a reason, and every result file is newer than the code. The counts must be read by this script from result files or a saved raw runner log; counts only typed in cannot reach PROVEN.",
+    "2. Rules traced (rewrite and reimagine): every P0 rule the module answers for is backed by a test that ran and passed: its id is in the test or class name of a result this script parsed, or a test file names it on a line not marked skipped or pending and that file's class ran and passed. A rule named only by skipped, pending or failing tests is named, not run; one only the notes name is claimed. Neither is tested.",
+    "3. Same behavior: the development cases, judged again by compare.py, executed at least one case and none differs or is missing (a difference a person approved is allowed and listed); for an uplift, no regression, no new failure, no missing test and no drop in executed tests against BASELINE.md.",
+    "4. Fresh inputs: at least 10 new inputs, none with the same output as a development case, ran on the legacy and the new code with no difference. Needed whenever the legacy could run here; when it could not, the proof is trace-based and the best verdict is PARTLY PROVEN.",
+    "5. Canary: a deliberate one-line break whose own result file or saved runner log shows failing tests. A line in the notes is a claim.",
+    "6. Source untouched: no file under legacy/<system> is newer than the analysis (PREFLIGHT.md), by a plain file walk; no version-control tool is run.",
+    "7. Baseline measured (uplift): the old version's numbers in BASELINE.md come from per-test result files, a per-test results file or a raw runner log that this script parsed (in analysis/<system>/baseline/, or on a Recorded: or Machine-readable: line of BASELINE.md), and the typed table agrees with them. A table typed by hand, or sources that disagree, cannot reach PROVEN.",
+    "8. Tests kept (uplift): no test file of the untouched legacy tree is missing from the working copy, no more than 25% of them changed, and the legacy tree has test files to compare against (walked by file, no process is run). The list is for a person to review; weakened assertions cannot be detected, only that files changed.",
+    "9. Deltas covered (uplift): every Behavioral-silent delta in DELTA_CATALOG.md has its site's file named, as a whole word, by some test file of the working copy. A name is not proof that the test exercises the change.",
+    "Open questions, unticked criteria and the sign-off are for a person. They never change the verdict.",
+    "A folder that holds only test code and the files that build it is test tooling: it is listed, not judged, and not counted."
+  ],
+  "legacy": {
+    "state": "clean",
+    "method": "by modification time, and no version-control tool was run",
+    "detail": "no file changed after the analysis started (1 files compared)",
+    "files": [],
+    "path": "legacy/debcred",
+    "target": "",
+    "ran": false
+  },
+  "problems": [],
+  "modules": [
+    {
+      "name": "sp_debcred_empresa",
+      "track": "rewrite",
+      "path": "modernized/debcred/sp_debcred_empresa",
+      "verdict": "PARTLY PROVEN",
+      "reasons": [
+        "Rules traced: 2 of 6 P0 rule(s) are not named by any test: RULE-013, RULE-014.",
+        "Same behavior: No equivalence cases were recorded: the new code was never compared with the legacy output.",
+        "Fresh inputs: The legacy could not run here (The legacy is a Sybase ASE / COBIS T-SQL stored procedure; no ASE (nor SQL Server) exists on this machine and the bank's test ASE is not reachable (PREFLIGHT 3b, brief section 7 A4). PostgreSQL in Docker is the target-side engine only and cannot run T-SQL. The proof is spec-based: expected values d\u2026), so the proof is trace-based: no fresh-input comparison was possible and the verdict cannot be PROVEN."
+      ],
+      "passed": [
+        "Tests ran: 115 test(s) executed, 0 failed, 0 skipped. Note: Phase 1 scope only (debit core, exits A and C); notifications, commissions and the order-header update are stubs by the brief's design, so their rules are not tested yet.",
+        "Canary: 3 canary run(s) shown by a result file or log; the first (verify's own canary, in a scratch copy: lbl_error's mode test flipped from @i_aplcobis = 'S' to 'N' (RULE-028: which channel carries the error code)) made 11 more test(s) fail than the clean run (analysis/debcred/equivalence/canary/sp_debcred_empresa/verify-errorexit-mode). 1 more are only claimed.",
+        "Source untouched: legacy/debcred is untouched: no file changed after the analysis started (1 files compared). Checked by modification time, and no version-control tool was run."
+      ],
+      "checks": [
+        {
+          "id": "tests",
+          "label": "Tests ran",
+          "state": "pass",
+          "detail": "115 test(s) executed, 0 failed, 0 skipped. Note: Phase 1 scope only (debit core, exits A and C); notifications, commissions and the order-header update are stubs by the brief's design, so their rules are not tested yet."
+        },
+        {
+          "id": "rules",
+          "label": "Rules traced",
+          "state": "gap",
+          "detail": "2 of 6 P0 rule(s) are not named by any test: RULE-013, RULE-014."
+        },
+        {
+          "id": "same",
+          "label": "Same behavior",
+          "state": "gap",
+          "detail": "No equivalence cases were recorded: the new code was never compared with the legacy output."
+        },
+        {
+          "id": "fresh",
+          "label": "Fresh inputs",
+          "state": "gap",
+          "detail": "The legacy could not run here (The legacy is a Sybase ASE / COBIS T-SQL stored procedure; no ASE (nor SQL Server) exists on this machine and the bank's test ASE is not reachable (PREFLIGHT 3b, brief section 7 A4). PostgreSQL in Docker is the target-side engine only and cannot run T-SQL. The proof is spec-based: expected values d\u2026), so the proof is trace-based: no fresh-input comparison was possible and the verdict cannot be PROVEN."
+        },
+        {
+          "id": "canary",
+          "label": "Canary",
+          "state": "pass",
+          "detail": "3 canary run(s) shown by a result file or log; the first (verify's own canary, in a scratch copy: lbl_error's mode test flipped from @i_aplcobis = 'S' to 'N' (RULE-028: which channel carries the error code)) made 11 more test(s) fail than the clean run (analysis/debcred/equivalence/canary/sp_debcred_empresa/verify-errorexit-mode). 1 more are only claimed."
+        },
+        {
+          "id": "source",
+          "label": "Source untouched",
+          "state": "pass",
+          "detail": "legacy/debcred is untouched: no file changed after the analysis started (1 files compared). Checked by modification time, and no version-control tool was run."
+        }
+      ],
+      "evidence": {
+        "tests": {
+          "executed": 115,
+          "failed": 0,
+          "skipped": 0,
+          "skippedNoReason": 0,
+          "stale": false,
+          "suites": [
+            {
+              "name": "unit and characterization tests (JUnit 5, jqwik, MockMvc)",
+              "command": "cd modernized/debcred/sp_debcred_empresa && rm -rf target .jqwik-database && ~/tools/apache-maven-3.9.9/bin/mvn -o test -Dmaven.test.failure.ignore=true",
+              "date": "",
+              "note": "Phase 1 scope only (debit core, exits A and C); notifications, commissions and the order-header update are stubs by the brief's design, so their rules are not tested yet.",
+              "source": "result files",
+              "files": 11,
+              "written": "2026-09-28 00:00 UTC",
+              "executed": 115,
+              "failed": 0,
+              "skipped": 0
+            }
+          ]
+        },
+        "legacy": {
+          "ran": false,
+          "how": "",
+          "why": "The legacy is a Sybase ASE / COBIS T-SQL stored procedure; no ASE (nor SQL Server) exists on this machine and the bank's test ASE is not reachable (PREFLIGHT 3b, brief section 7 A4). PostgreSQL in Docker is the target-side engine only and cannot run T-SQL. The proof is spec-based: expected values d\u2026"
+        },
+        "rules": {
+          "tied": true,
+          "counted": 39,
+          "outOfScope": 0,
+          "totals": {
+            "P0": {
+              "rules": 6,
+              "tested": 4,
+              "named, not run": 0,
+              "code only": 0,
+              "claimed only": 0,
+              "none": 2
+            },
+            "P1": {
+              "rules": 26,
+              "tested": 16,
+              "named, not run": 0,
+              "code only": 0,
+              "claimed only": 0,
+              "none": 10
+            },
+            "P2": {
+              "rules": 7,
+              "tested": 3,
+              "named, not run": 0,
+              "code only": 0,
+              "claimed only": 0,
+              "none": 4
+            }
+          },
+          "p0NoTests": [
+            "RULE-013",
+            "RULE-014"
+          ],
+          "namedNotRun": [],
+          "perTestResults": true,
+          "p0": [
+            {
+              "id": "RULE-007",
+              "name": "Accounting transaction code and causal are resolved from the accounting configuration; missing configuration aborts the\u2026",
+              "confidence": "High",
+              "status": "tested",
+              "main": 2,
+              "tests": 20,
+              "claimed": false,
+              "by": "test name",
+              "where": "modernized/debcred/sp_debcred_empresa/src/test/java/com/nexti/debcred/Rule007Rule029Rule030AccountingConfigurationTest.java:0"
+            },
+            {
+              "id": "RULE-008",
+              "name": "Only current, savings, virtual or accounting company accounts may be debited",
+              "confidence": "High",
+              "status": "tested",
+              "main": 2,
+              "tests": 8,
+              "claimed": false,
+              "by": "test name",
+              "where": "modernized/debcred/sp_debcred_empresa/src/test/java/com/nexti/debcred/Rule009Rule008Rule033Rule026DebitRoutingTest.java:19"
+            },
+            {
+              "id": "RULE-009",
+              "name": "Only current, savings, virtual and accounting account types may be debited",
+              "confidence": "High",
+              "status": "tested",
+              "main": 4,
+              "tests": 20,
+              "claimed": false,
+              "by": "test name",
+              "where": "modernized/debcred/sp_debcred_empresa/src/test/java/com/nexti/debcred/Rule009Rule008Rule033Rule026DebitRoutingTest.java:0"
+            },
+            {
+              "id": "RULE-012",
+              "name": "Debit outcome sets process status, rolls back on failure, and the movement is always recorded",
+              "confidence": "High",
+              "status": "tested",
+              "main": 6,
+              "tests": 15,
+              "claimed": false,
+              "by": "test name",
+              "where": "modernized/debcred/sp_debcred_empresa/src/test/java/com/nexti/debcred/NotificationStubTest.java:18"
+            },
+            {
+              "id": "RULE-013",
+              "name": "Separate commission is debited as its own movement; failure rolls back the whole debit",
+              "confidence": "Medium",
+              "status": "none",
+              "main": 0,
+              "tests": 0,
+              "claimed": false,
+              "by": "",
+              "where": ""
+            },
+            {
+              "id": "RULE-014",
+              "name": "Order header transitions from Initial to In-Transition by channel, option and payment form",
+              "confidence": "High",
+              "status": "none",
+              "main": 0,
+              "tests": 0,
+              "claimed": false,
+              "by": "",
+              "where": ""
+            }
+          ]
+        },
+        "leftOut": [
+          "Fresh-input check not run: the legacy cannot execute here, so no legacy output exists to compare against; the 10 golden cases in the module's test resources are development cases, not a legacy oracle.",
+          "Malformed records not tried for the same reason (INTENT.md asks for exact parity, quirks included, so they must be tried once the bank's test ASE is reachable)."
+        ],
+        "canary": [
+          {
+            "change": "verify's own canary, in a scratch copy: lbl_error's mode test flipped from @i_aplcobis = 'S' to 'N' (RULE-028: which channel carries the error code)",
+            "testsFailed": 11,
+            "shown": true,
+            "where": [
+              "analysis/debcred/equivalence/canary/sp_debcred_empresa/verify-errorexit-mode"
+            ]
+          },
+          {
+            "change": "transform's canary: rollback to the savepoint replaced by a full rollback (RULE-012 exit A)",
+            "testsFailed": 14,
+            "shown": true,
+            "where": [
+              "analysis/debcred/equivalence/canary/sp_debcred_empresa/savepoint"
+            ]
+          },
+          {
+            "change": "transform's canary: commission count truncation DOWN changed to HALF_UP (RULE-002)",
+            "testsFailed": 3,
+            "shown": true,
+            "where": [
+              "analysis/debcred/equivalence/canary/sp_debcred_empresa/truncation"
+            ]
+          },
+          {
+            "change": "`rollbackToSavepoint` replaced by a full rollback + new transaction",
+            "testsFailed": 14,
+            "shown": false,
+            "where": []
+          }
+        ]
+      },
+      "caveats": [],
+      "needsPerson": [],
+      "brief": {
+        "found": true,
+        "phase": "",
+        "items": [
+          {
+            "text": "`TRANSFORMATION_NOTES.md` records every fact the pilot learned about ASE transactions through JDBC, and this brief is regenerated or its \u00a78 re-signed for Phases 2+.",
+            "where": "Phase 1 exit criterion"
+          },
+          {
+            "text": "Characterization tests pass for RULE-013, 017, 001, 023, and exit B is pinned by a test that asserts the final state of debit, movement and header.",
+            "where": "Phase 2 exit criterion"
+          },
+          {
+            "text": "The dead remnants `:1716-1730` and `:1844-1854` are listed as not migrated in `TRANSFORMATION_NOTES.md` with a test that shows they are unreachable.",
+            "where": "Phase 2 exit criterion"
+          },
+          {
+            "text": "Characterization tests pass for RULE-014, 018, 009.",
+            "where": "Phase 3 exit criterion"
+          },
+          {
+            "text": "End-to-end walkthrough 1 (\u00a74) passes with the notification step stubbed.",
+            "where": "Phase 3 exit criterion"
+          },
+          {
+            "text": "Characterization tests pass for RULE-034, 030, 031, 010, 019, 005, 006, 003, 004, 011.",
+            "where": "Phase 4 exit criterion"
+          },
+          {
+            "text": "The stub from Phase 1 is replaced and Phases 1\u20133 tests still pass unchanged.",
+            "where": "Phase 4 exit criterion"
+          },
+          {
+            "text": "Walkthroughs 1\u20134 (\u00a74) pass end to end.",
+            "where": "Phase 4 exit criterion"
+          },
+          {
+            "text": "`/code-modernization:modernize-harden debcred` run on the Java service: no open Critical or High finding that is not an accepted parity risk listed in \u00a77 A9.",
+            "where": "Phase 5 exit criterion"
+          },
+          {
+            "text": "UAT by the \u00a77 A7 SME on walkthroughs 1\u20134, recorded in `analysis/debcred/UAT.md`.",
+            "where": "Phase 5 exit criterion"
+          },
+          {
+            "text": "Coexistence runbook written: how the fa\u00e7ade and the service run side by side, how to roll back to the T-SQL procedure.",
+            "where": "Phase 5 exit criterion"
+          },
+          {
+            "text": "`KNOWN_DIFFERENCES.md` lists every observable difference a person approved (expected: none, by the parity decision; any that appear are listed with the approver's reason).",
+            "where": "Phase 5 exit criterion"
+          }
+        ],
+        "count": 12
+      },
+      "notProven": [
+        "It does not prove behavior on inputs nobody tried: the equivalence cases and the fresh inputs are samples, not the whole input space.",
+        "The legacy could not run here, so the comparison rests on recorded outputs and traces. It is only as good as that recording.",
+        "It does not cover speed, capacity, security, concurrency, or anything the tests and cases do not exercise.",
+        "It traces only the rules that were extracted: behavior nobody wrote down as a rule has no rule to trace.",
+        "A test that names a rule shows the rule is mentioned, not that the test is a good one. The canary shows only that some test can fail.",
+        "It does not replace the review and sign-off of the people who own the system."
+      ],
+      "verifiedAt": "2026-09-28 00:02 UTC"
+    }
+  ],
+  "toolingOnly": [],
+  "signoff": {
+    "name": "",
+    "role": "",
+    "date": "",
+    "decision": ""
+  },
+  "overall": {
+    "verdict": "PARTLY PROVEN",
+    "counts": {
+      "PROVEN": 0,
+      "PARTLY PROVEN": 1,
+      "NOT PROVEN": 0
+    }
+  }
+}

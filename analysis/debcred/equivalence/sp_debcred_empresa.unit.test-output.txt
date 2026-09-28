@@ -1,0 +1,125 @@
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::load has been called by org.fusesource.jansi.internal.JansiLoader in an unnamed module (file:/C:/Users/david.balseca/tools/apache-maven-3.9.9/lib/jansi-2.4.1.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by com.google.common.util.concurrent.AbstractFuture$UnsafeAtomicHelper (file:/C:/Users/david.balseca/tools/apache-maven-3.9.9/lib/guava-33.2.1-jre.jar)
+WARNING: Please consider reporting this to the maintainers of class com.google.common.util.concurrent.AbstractFuture$UnsafeAtomicHelper
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] ----------------< com.nexti.debcred:sp-debcred-empresa >----------------
+[INFO] Building sp-debcred-empresa 0.1.0-SNAPSHOT
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.5.0:resources (default-resources) @ sp-debcred-empresa ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] Copying 0 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.15.0:compile (default-compile) @ sp-debcred-empresa ---
+[INFO] Recompiling the module because of changed source code.
+[INFO] Compiling 47 source files with javac [debug parameters release 21] to target\classes
+[INFO] 
+[INFO] --- resources:3.5.0:testResources (default-testResources) @ sp-debcred-empresa ---
+[INFO] Copying 2 resources from src\test\resources to target\test-classes
+[INFO] 
+[INFO] --- compiler:3.15.0:testCompile (default-testCompile) @ sp-debcred-empresa ---
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 13 source files with javac [debug parameters release 21] to target\test-classes
+[INFO] /C:/Users/david.balseca/OneDrive - NEXTI BUSINESS SOLUTIONS SAS/Escritorio/New NexTI/Nexti Modernization/plugin/modernized/debcred/sp_debcred_empresa/src/test/java/com/nexti/debcred/GoldenCasesTest.java: C:\Users\david.balseca\OneDrive - NEXTI BUSINESS SOLUTIONS SAS\Escritorio\New NexTI\Nexti Modernization\plugin\modernized\debcred\sp_debcred_empresa\src\test\java\com\nexti\debcred\GoldenCasesTest.java uses or overrides a deprecated API.
+[INFO] /C:/Users/david.balseca/OneDrive - NEXTI BUSINESS SOLUTIONS SAS/Escritorio/New NexTI/Nexti Modernization/plugin/modernized/debcred/sp_debcred_empresa/src/test/java/com/nexti/debcred/GoldenCasesTest.java: Recompile with -Xlint:deprecation for details.
+[INFO] 
+[INFO] --- surefire:3.5.6:test (default-test) @ sp-debcred-empresa ---
+[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider
+[INFO] 
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running com.nexti.debcred.api.DebitControllerWebTest
+19:00:17.839 [main] INFO org.springframework.boot.test.context.SpringBootTestContextBootstrapper -- Found @SpringBootConfiguration com.nexti.debcred.DebcredApplication for test class com.nexti.debcred.api.DebitControllerWebTest
+19:00:17.869 [main] INFO org.springframework.boot.test.context.SpringBootTestContextBootstrapper -- Found @SpringBootConfiguration com.nexti.debcred.DebcredApplication for test class com.nexti.debcred.api.DebitControllerWebTest
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v4.1.1)
+
+2026-09-27T19:00:19.441-05:00  INFO 33520 --- [sp-debcred-empresa] [           main] c.n.debcred.api.DebitControllerWebTest   : Starting DebitControllerWebTest using Java 24.0.2 with PID 33520 (started by david.balseca in C:\Users\david.balseca\OneDrive - NEXTI BUSINESS SOLUTIONS SAS\Escritorio\New NexTI\Nexti Modernization\plugin\modernized\debcred\sp_debcred_empresa)
+2026-09-27T19:00:19.449-05:00  INFO 33520 --- [sp-debcred-empresa] [           main] c.n.debcred.api.DebitControllerWebTest   : No active profile set, falling back to 1 default profile: "default"
+2026-09-27T19:00:24.209-05:00  INFO 33520 --- [sp-debcred-empresa] [           main] o.s.b.t.m.w.SpringBootMockServletContext : Initializing Spring TestDispatcherServlet ''
+2026-09-27T19:00:24.210-05:00  INFO 33520 --- [sp-debcred-empresa] [           main] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-09-27T19:00:24.212-05:00  INFO 33520 --- [sp-debcred-empresa] [           main] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 2 ms
+2026-09-27T19:00:24.332-05:00  INFO 33520 --- [sp-debcred-empresa] [           main] c.n.debcred.api.DebitControllerWebTest   : Started DebitControllerWebTest in 6.202 seconds (process running for 9.342)
+Mockito is currently self-attaching to enable the inline-mock-maker. This will no longer work in future releases of the JDK. Please add Mockito as an agent to your build as described in Mockito's documentation: https://javadoc.io/doc/org.mockito/mockito-core/latest/org.mockito/org/mockito/Mockito.html#0.3
+WARNING: A Java agent has been loaded dynamically (C:\Users\david.balseca\.m2\repository\net\bytebuddy\byte-buddy-agent\1.18.11\byte-buddy-agent-1.18.11.jar)
+WARNING: If a serviceability tool is in use, please run with -XX:+EnableDynamicAgentLoading to hide this warning
+WARNING: If a serviceability tool is not in use, please run with -Djdk.instrument.traceUsage for more information
+WARNING: Dynamic loading of agents will be disallowed by default in a future release
+Java HotSpot(TM) 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
+2026-09-27T19:00:27.917-05:00 ERROR 33520 --- [sp-debcred-empresa] [           main] com.nexti.debcred.api.ApiErrorHandler    : ASE call failed [3fc426cf-643a-4497-ba88-4ac79ac8ef81]: cobis..sp_ndc_ahcc failed
+2026-09-27T19:00:27.995-05:00 ERROR 33520 --- [sp-debcred-empresa] [           main] com.nexti.debcred.api.ApiErrorHandler    : ASE unavailable [20cd70ae-fc24-4639-9b36-b655fa1432aa]: could not open an ASE connection
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 11.29 s -- in com.nexti.debcred.api.DebitControllerWebTest
+[INFO] Running com.nexti.debcred.GoldenCasesTest
+equivalence cases executed: 10 of 10
+[INFO] Tests run: 11, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.195 s -- in com.nexti.debcred.GoldenCasesTest
+[INFO] Running com.nexti.debcred.NotificationStubTest
+[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.075 s -- in com.nexti.debcred.NotificationStubTest
+[INFO] Running com.nexti.debcred.Rule007Rule029Rule030AccountingConfigurationTest
+[INFO] Tests run: 15, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.189 s -- in com.nexti.debcred.Rule007Rule029Rule030AccountingConfigurationTest
+[INFO] Running com.nexti.debcred.Rule009Rule008Rule033Rule026DebitRoutingTest
+[INFO] Tests run: 19, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.648 s -- in com.nexti.debcred.Rule009Rule008Rule033Rule026DebitRoutingTest
+[INFO] Running com.nexti.debcred.Rule012Rule015Rule028Rule023ExitsTest
+[INFO] Tests run: 15, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.086 s -- in com.nexti.debcred.Rule012Rule015Rule028Rule023ExitsTest
+[INFO] Running com.nexti.debcred.Rule022LedgerDebitTest
+[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.079 s -- in com.nexti.debcred.Rule022LedgerDebitTest
+[INFO] Running com.nexti.debcred.Rule027Rule002CommissionNormalizationTest
+[INFO] Tests run: 12, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.164 s -- in com.nexti.debcred.Rule027Rule002CommissionNormalizationTest
+[INFO] Running com.nexti.debcred.Rule037Rule039DefaultsAndPassThroughTest
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.108 s -- in com.nexti.debcred.Rule037Rule039DefaultsAndPassThroughTest
+[INFO] Running com.nexti.debcred.Rule038Rule031Rule032DebitReferenceTest
+[INFO] Tests run: 14, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.231 s -- in com.nexti.debcred.Rule038Rule031Rule032DebitReferenceTest
+[INFO] Running com.nexti.debcred.Rule002CommissionTruncationPropertyTest
+timestamp = 2026-09-27T19:00:33.888353900, Rule002CommissionTruncationPropertyTest:RULE-002: nchq = trunc(commission / tariff) and solca = tariff for random amounts = 
+                              |-----------------------jqwik-----------------------
+tries = 300                   | # of calls to property
+checks = 300                  | # of not rejected calls
+generation = RANDOMIZED       | parameters are randomly generated
+after-failure = SAMPLE_FIRST  | try previously failed sample, then previous seed
+when-fixed-seed = ALLOW       | fixing the random seed is allowed
+edge-cases#mode = MIXIN       | edge cases are mixed in
+edge-cases#total = 20         | # of all combined edge cases
+edge-cases#tried = 16         | # of edge cases tried in current run
+seed = -1704746918190110183   | random seed to reproduce generated values
+
+
+timestamp = 2026-09-27T19:00:33.981045200, Rule002CommissionTruncationPropertyTest:RULE-002: a failed tariff lookup always yields nchq 0 and solca 0 whatever the commission = 
+                              |-----------------------jqwik-----------------------
+tries = 100                   | # of calls to property
+checks = 100                  | # of not rejected calls
+generation = RANDOMIZED       | parameters are randomly generated
+after-failure = SAMPLE_FIRST  | try previously failed sample, then previous seed
+when-fixed-seed = ALLOW       | fixing the random seed is allowed
+edge-cases#mode = MIXIN       | edge cases are mixed in
+edge-cases#total = 5          | # of all combined edge cases
+edge-cases#tried = 4          | # of edge cases tried in current run
+seed = -8057859373668334553   | random seed to reproduce generated values
+
+
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 2.611 s -- in com.nexti.debcred.Rule002CommissionTruncationPropertyTest
+[INFO] 
+[INFO] Results:
+[INFO] 
+[INFO] Tests run: 115, Failures: 0, Errors: 0, Skipped: 0
+[INFO] 
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  39.731 s
+[INFO] Finished at: 2026-09-27T19:00:34-05:00
+[INFO] ------------------------------------------------------------------------
