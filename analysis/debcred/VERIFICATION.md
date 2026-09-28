@@ -80,10 +80,11 @@ A person fills this in. Claude leaves it blank.
 
 | | |
 |---|---|
-| Name | ________________ |
-| Role | ________________ |
-| Date | __________ |
-| Decision | accept / accept with conditions / reject |
+| Name | David Balseca |
+| Role | SME y aprobador |
+| Date | 2026-09-28 |
+| Decision | accept with conditions: comparar contra el ASE de pruebas del banco cuando haya acceso (§7 A6) |
+
 
 ## How each verdict is computed
 
