@@ -286,8 +286,8 @@ public class DebitCompanyAccountService {
                     valorDebito, commissions.comision(), commissions.valorComision(), tranNcnd));
             if (outcome.configured()) {
                 codErrord = outcome.returnCode();                                                 // RULE-012, RULE-034
-                if (outcome.valorDebito() != null) {
-                    valorDebito = outcome.valorDebito();                                          // RULE-003
+                if (outcome.replacesValorDebito()) {
+                    valorDebito = outcome.valorDebito();                                          // RULE-003, A19-b
                 }
                 oError = outcome.oError();                                                        // A15
                 wRowdbBiz = outcome.wRowdbBiz();                                                  // A17

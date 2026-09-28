@@ -58,6 +58,7 @@ public final class CustomerNotifications implements NotificationStep {
         BigDecimal valorComision = null;
         BigDecimal valorDebito = ctx.valorDebito();
         BigDecimal newValorDebito = null;
+        boolean replacesValorDebito = false;
         Integer wRowdbBiz = null;
         if (trimmedService.equals("TRANSWIFT")) {                                                  // RULE-019
             List<SwiftCreditDetail> live = details.liveSwiftCreditDetails(r.iOrden(), r.iSecuencial(), r.iEmpresa());
@@ -71,7 +72,8 @@ public final class CustomerNotifications implements NotificationStep {
             valorComision = ctx.valorComision();
         } else if (INTERBANK_SERVICES.contains(trimmedService)) {                                  // RULE-003, RULE-004
             valorComision = ctx.comision();
-            newValorDebito = r.iValorOrdenado();                                                   // 886
+            newValorDebito = r.iValorOrdenado();                                                   // 886, NULL too (A19-b)
+            replacesValorDebito = true;
             valorDebito = newValorDebito;
             List<InterbankCreditDetail> live = details.liveInterbankCreditDetails(r.iOrden());
             wRowdbBiz = live.size();                                                               // 912 (A17)
@@ -121,7 +123,8 @@ public final class CustomerNotifications implements NotificationStep {
             log.warn("notifier failed for order {} service {}: status {}; the debit is reversed (RULE-034, line 1248)",
                     r.iOrden(), trimmedService, returnCode);
         }
-        return new NotificationOutcome(true, returnCode, newValorDebito, oError, wRowdbBiz);   // 1248
+        return new NotificationOutcome(true, returnCode, newValorDebito, oError, wRowdbBiz,    // 1248
+                replacesValorDebito);
     }
 
     /** 798-812: the SMS service code prefix of the lowest matching row, or NULL. */

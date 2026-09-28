@@ -1,6 +1,6 @@
 # Verification: debcred
 
-Written by `scripts/proof_pack.py` on 2026-09-28 04:55 UTC. Each module's verdict is computed from the evidence files by the fixed rules at the end of this page. No model's opinion is part of it.
+Written by `scripts/proof_pack.py` on 2026-09-28 05:03 UTC. Each module's verdict is computed from the evidence files by the fixed rules at the end of this page. No model's opinion is part of it.
 
 **Overall: PARTLY PROVEN** (1 partly proven)
 
@@ -11,11 +11,11 @@ Legacy source: `legacy/debcred`. Could it run here: no. The source was checked b
 
 | Module | Track | Verdict | Tests executed | Failed | P0 rules tested | Same behavior | Fresh inputs |
 |---|---|---|---|---|---|---|---|
-| sp_debcred_empresa | rewrite | **PARTLY PROVEN** | 498 | 0 | 6 of 6 | not proven | not proven |
+| sp_debcred_empresa | rewrite | **PARTLY PROVEN** | 499 | 0 | 6 of 6 | not proven | not proven |
 
 ## sp_debcred_empresa: PARTLY PROVEN
 
-Track: rewrite. Folder: `modernized/debcred/sp_debcred_empresa`. Checked 2026-09-28 04:55 UTC.
+Track: rewrite. Folder: `modernized/debcred/sp_debcred_empresa`. Checked 2026-09-28 05:03 UTC.
 
 **What is missing or wrong**
 
@@ -24,23 +24,23 @@ Track: rewrite. Folder: `modernized/debcred/sp_debcred_empresa`. Checked 2026-09
 
 **What passed**
 
-- Tests ran: 498 test(s) executed, 0 failed, 0 skipped. Note: Phases 1-4 in scope (all code blocks of the procedure). Called procedures are in-memory doubles; JDBC adapter tests use mocks, not a real ASE.
+- Tests ran: 499 test(s) executed, 0 failed, 0 skipped. Note: Phases 1-4 in scope (all code blocks of the procedure). Called procedures are in-memory doubles; JDBC adapter tests use mocks, not a real ASE.
 - Rules traced: All 6 P0 rule(s) this module answers for are backed by a test that ran and passed.
-- Canary: 5 canary run(s) shown by a result file or log; the first (verify's own canary (Phase 4), in a scratch copy: beneficiary account type 8 mapped to 'CON' instead of 'ESP' (RULE-004/RULE-005, lines 968-972)) made 1 more test(s) fail than the clean run (analysis/debcred/equivalence/canary/sp_debcred_empresa/verify-prodcre8). 5 more are only claimed.
+- Canary: 6 canary run(s) shown by a result file or log; the first (verify's own canary (Phase 4), in a scratch copy: beneficiary account type 8 mapped to 'CON' instead of 'ESP' (RULE-004/RULE-005, lines 968-972)) made 1 more test(s) fail than the clean run (analysis/debcred/equivalence/canary/sp_debcred_empresa/verify-prodcre8). 6 more are only claimed.
 - Source untouched: legacy/debcred is untouched: no file changed after the analysis started (1 files compared). Checked by modification time, and no version-control tool was run.
 
 | Check | Result | Detail |
 |---|---|---|
-| Tests ran | pass | 498 test(s) executed, 0 failed, 0 skipped. Note: Phases 1-4 in scope (all code blocks of the procedure). Called procedures are in-memory doubles; JDBC adapter tests use mocks, not a real ASE. |
+| Tests ran | pass | 499 test(s) executed, 0 failed, 0 skipped. Note: Phases 1-4 in scope (all code blocks of the procedure). Called procedures are in-memory doubles; JDBC adapter tests use mocks, not a real ASE. |
 | Rules traced | pass | All 6 P0 rule(s) this module answers for are backed by a test that ran and passed. |
 | Same behavior | not proven | No equivalence cases were recorded: the new code was never compared with the legacy output. |
 | Fresh inputs | not proven | The legacy could not run here (The legacy is a Sybase ASE / COBIS T-SQL stored procedure; no ASE (nor SQL Server) exists on this machine and the bank's test ASE is not reachable (PREFLIGHT 3b, brief section 7 A4). The local PostgreSQL environment runs the Java service against simulated procedures, not the legacy. The proof is sp…), so the proof is trace-based: no fresh-input comparison was possib… |
-| Canary | pass | 5 canary run(s) shown by a result file or log; the first (verify's own canary (Phase 4), in a scratch copy: beneficiary account type 8 mapped to 'CON' instead of 'ESP' (RULE-004/RULE-005, lines 968-972)) made 1 more test(s) fail than the clean run (analysis/debcred/equivalence/canary/sp_debcred_empresa/verify-prodcre8). 5 more are only claimed. |
+| Canary | pass | 6 canary run(s) shown by a result file or log; the first (verify's own canary (Phase 4), in a scratch copy: beneficiary account type 8 mapped to 'CON' instead of 'ESP' (RULE-004/RULE-005, lines 968-972)) made 1 more test(s) fail than the clean run (analysis/debcred/equivalence/canary/sp_debcred_empresa/verify-prodcre8). 6 more are only claimed. |
 | Source untouched | pass | legacy/debcred is untouched: no file changed after the analysis started (1 files compared). Checked by modification time, and no version-control tool was run. |
 
-tests executed: 498, failed 0, skipped 0
+tests executed: 499, failed 0, skipped 0
 
-- unit and characterization tests (JUnit 5, jqwik, MockMvc): `cd modernized/debcred/sp_debcred_empresa && rm -rf target .jqwik-database && ~/tools/apache-maven-3.9.9/bin/mvn -o test -Dmaven.test.failure.ignore=true` (from result files): 498 executed, 0 failed, 0 skipped, 32 result files written 2026-09-28 04:54 UTC. Note: Phases 1-4 in scope (all code blocks of the procedure). Called procedures are in-memory doubles; JDBC adapter tests use mocks, not a real ASE.
+- unit and characterization tests (JUnit 5, jqwik, MockMvc): `cd modernized/debcred/sp_debcred_empresa && rm -rf target .jqwik-database && ~/tools/apache-maven-3.9.9/bin/mvn -o test -Dmaven.test.failure.ignore=true` (from result files): 499 executed, 0 failed, 0 skipped, 32 result files written 2026-09-28 05:02 UTC. Note: Phases 1-4 in scope (all code blocks of the procedure). Called procedures are in-memory doubles; JDBC adapter tests use mocks, not a real ASE.
 
 ### P0 business rules
 
@@ -63,7 +63,7 @@ Claude never ticks these. A person decides them.
 - [ ] UAT by the §7 A7 SME on walkthroughs 1–4, recorded in `analysis/debcred/UAT.md`. [Phase 5 exit criterion]
 - [ ] Coexistence runbook written: how the façade and the service run side by side, how to roll back to the T-SQL procedure. [Phase 5 exit criterion]
 - [ ] `KNOWN_DIFFERENCES.md` lists every observable difference a person approved (expected: none, by the parity decision; any that appear are listed with the approver's reason). [Phase 5 exit criterion]
-- [ ] A19: Open from the Phase 4 review (2026-09-27). (a) Which row a multi-row scalar read keeps (interbank and beneficiary detail by order only, classification): the legacy's is undefined, the service takes the first. (b) TRANSCLI/TARJCRED/COMEXT with a NULL ordered value: the legacy records the moveme… [open question, section 7]
+- [ ] A20: To confirm on the bank's test ASE (from the Phase 4 review, 2026-09-27): the COBIS `raiserror` + return-code convention through jTDS (the notifiers already carry on; exits A and B would need the same), `convert(varchar(11), money)` over 100,000,000.00, jTDS `prepareSQL` inside `begin tran` and… [open question, section 7]
 
 ### What this does not prove
 

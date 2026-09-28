@@ -108,6 +108,19 @@ class Rule003Rule004Rule011InterbankNotificationTest {
     }
 
     @Test
+    @DisplayName("RULE-003 (brief 7 A19-b): a NULL ordered value replaces the debit value too; the movement carries NULL, the event value is NULL")
+    void rule003_nullOrderedValueReplacesTheDebitValueWithNull() {
+        FakeAseSession ase = withLiveDetail(4);
+
+        DebitResult result = ase.service().debit(transcli().valorOrdenado(null).build());
+
+        assertThat(result).isEqualTo(new DebitResult(0, 0, null));
+        assertThat(ase.onlyDebitNote().iValor()).isEqualByComparingTo("100.50");
+        assertThat(ase.onlyMovement().iValorMov()).as("886: select @i_valor_debito = @i_valor_ordenado (NULL)").isNull();
+        assertThat(ase.onlyEvent().iValor()).isNull();
+    }
+
+    @Test
     @DisplayName("RULE-003 + RULE-012: when the notifier then fails, the 'X' movement of exit A also carries the ordered value")
     void rule003_rule012_exitAMovementCarriesTheOrderedValue() {
         FakeAseSession ase = withLiveDetail(4).event(30001);

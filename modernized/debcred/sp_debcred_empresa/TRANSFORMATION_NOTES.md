@@ -189,7 +189,7 @@ Brief Phase 4, entry criteria met (Phase 3 exit criteria; section 7 A5 assumed c
 
 **Not migrated:** the stray result set `select @i_comision, @i_valor_ordenado` (882): approved known difference (A11, RULE-011), goes to `KNOWN_DIFFERENCES.md` in Phase 5.
 
-**Deliberate deviations:** none that change a business outcome. For a multi-row scalar read (the interbank and beneficiary detail by order only, the classification) the legacy keeps an undefined row; the service takes the first row the database returns, and every field of one read comes from the same row. **Open for a decision** (review M2), not pinned.
+**Deliberate deviations:** none that change a business outcome. For a multi-row scalar read (the interbank and beneficiary detail by order only, the classification) the legacy keeps an undefined row; the service takes the first row the database returns, and every field of one read comes from the same row. **Decided (David Balseca, 2026-09-28, brief section 7 A19-a): the first row the database returns** (current behavior).
 
 **Proof:** **498 tests, 0 failures, 0 skipped** (`mvn -o test` from clean): Phases 1-3's 286 (one-line change only in the two placeholder pins above), 209 Phase 4 characterization tests (channel and SMS service, TRANSWIFT, interbank, cost and texts, basic notification + A15, event + block list, notifier failure reversing the debit on committed state, `@wRowdbBiz`/122004, walkthroughs 1-4 end to end, production wiring, JDBC adapter) and 3 adapter tests from the review. **`equivalence cases executed: 56 of 56`** (15 new golden cases). Equivalence is spec-based: the legacy was not executable here (no ASE); ceiling PARTLY PROVEN. **Canaries** (XML under `analysis/debcred/equivalence/canary/sp_debcred_empresa/`):
 
@@ -205,8 +205,8 @@ Brief Phase 4, entry criteria met (Phase 3 exit criteria; section 7 A5 assumed c
 | # | Finding | Change |
 |---|---|---|
 | H1 | COBIS notifiers report a failure with `raiserror` + return code and the legacy carries on (1248 -> exit A); jTDS turns the raiserror into an `SQLException`, so the approved reversal would surface as HTTP 502 with no 'X' movement | `JdbcAseSession.callCarryingOn` for the two notifiers: a raised error answers the return status (else the ASE error number, else -1) and exit A runs; a lost transaction (1205/08xxx) still throws. 3 adapter tests + canary. **To confirm on the bank's test ASE.** The same convention affects the Phase 1-3 procedure calls: follow-up below. |
-| M1 | A NULL `@i_valor_ordenado` on TRANSCLI/TARJCRED/COMEXT replaces the debit value with NULL in the legacy; `NotificationOutcome.valorDebito` uses null for "no replacement" | Open (contract open question); needs an outcome flag. Listed for the verify/Phase 5 pass. |
-| M2 | Multi-row scalar reads: ASE usually keeps the last row scanned, the service the first | Open for a decision (see above). |
+| M1 | A NULL `@i_valor_ordenado` on TRANSCLI/TARJCRED/COMEXT replaces the debit value with NULL in the legacy; `NotificationOutcome.valorDebito` uses null for "no replacement" | **Done (brief section 7 A19-b, 2026-09-28: match the legacy).** `NotificationOutcome.replacesValorDebito` says the value is replaced, NULL included; the movement is recorded with NULL. Test `rule003_nullOrderedValueReplacesTheDebitValueWithNull`; `Canary: replacement only when non-null -> 1 test failed` (`canary/.../a19b-null-ordered`). 499 tests, 0 failures. |
+| M2 | Multi-row scalar reads: ASE usually keeps the last row scanned, the service the first | Decided: first row (A19-a). |
 | M3 | `convert(varchar(11), money)` for 100,000,000.00 or more | Open; ASE behavior to confirm (error vs truncation). |
 | M4 | jTDS URL settings inside `begin tran` (`prepareSQL`, `sendStringParametersAsUnicode`) | URL template documented in `application.yml`; to confirm on the bank's test ASE with `ansinull`. |
 | M5 | A notifier failure looks like a debit failure in the logs | WARN log in `CustomerNotifications` (no behavior change). |
@@ -214,7 +214,7 @@ Brief Phase 4, entry criteria met (Phase 3 exit criteria; section 7 A5 assumed c
 
 **Follow-ups:**
 1. **Bank's test ASE:** confirm H1 (the COBIS `raiserror` convention; if confirmed, apply `callCarryingOn` to `sp_ndc_ahcc`, `sp_vi_ndc_automatica`, `sp_grb_mov_y_frmpgo`, `sp_grb_comision` so exits A and B also survive jTDS), M3, M4, L1 (`sp_cerror` parameter order), together with D1-7 and M2 of Phase 1.
-2. **Decisions:** M2 (which row of a multi-row read), M1 (NULL ordered value).
+2. ~~Decisions M1, M2~~: decided in brief section 7 A19 (2026-09-28). The ASE confirmations are section 7 A20.
 3. **Phase 5 / `KNOWN_DIFFERENCES.md`:** the 882 result set (A11), `@o_reg_a_proc` NULL, D1-2 and D1-3.
 
 ## Side by side: notification channel, legacy 760-794 vs `CustomerNotifications.Channel.of`

@@ -733,3 +733,10 @@ codes sorted with `String.compareTo` (a binary sort order).
 step** (it then answers that outcome without running the real step): this keeps `NotificationStubTest`
 unchanged. An unscripted session with an empty catalogue answers `notConfigured()`, exactly the Phase 1
 stub, so no Phase 1-3 expectation moves.
+
+### Change after verify (brief section 7 A19-b, 2026-09-28)
+
+`NotificationOutcome` gains `boolean replacesValorDebito` (6th component). The 5- and 3-argument constructors
+keep their meaning (`replacesValorDebito = valorDebito != null`). `CustomerNotifications` sets it to `true` for
+TRANSCLI/TARJCRED/COMEXT, so a NULL `@i_valor_ordenado` replaces the working debit value with NULL (line 886)
+and the movement is recorded with NULL, as the legacy does. Multi-row reads keep the first row (A19-a).

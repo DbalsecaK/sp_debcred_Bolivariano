@@ -1,7 +1,7 @@
 {
   "v": 1,
   "system": "debcred",
-  "generated": "2026-09-28 04:55 UTC",
+  "generated": "2026-09-28 05:03 UTC",
   "asked": "sp_debcred_empresa",
   "rules": [
     "PROVEN needs every check to pass: the six below, and for an uplift three more (7 to 9). NOT PROVEN when any check fails. PARTLY PROVEN when nothing failed but a check could not pass.",
@@ -38,9 +38,9 @@
         "Fresh inputs: The legacy could not run here (The legacy is a Sybase ASE / COBIS T-SQL stored procedure; no ASE (nor SQL Server) exists on this machine and the bank's test ASE is not reachable (PREFLIGHT 3b, brief section 7 A4). The local PostgreSQL environment runs the Java service against simulated procedures, not the legacy. The proof is sp\u2026), so the proof is trace-based: no fresh-input comparison was possible and the verdict cannot be PROVEN."
       ],
       "passed": [
-        "Tests ran: 498 test(s) executed, 0 failed, 0 skipped. Note: Phases 1-4 in scope (all code blocks of the procedure). Called procedures are in-memory doubles; JDBC adapter tests use mocks, not a real ASE.",
+        "Tests ran: 499 test(s) executed, 0 failed, 0 skipped. Note: Phases 1-4 in scope (all code blocks of the procedure). Called procedures are in-memory doubles; JDBC adapter tests use mocks, not a real ASE.",
         "Rules traced: All 6 P0 rule(s) this module answers for are backed by a test that ran and passed.",
-        "Canary: 5 canary run(s) shown by a result file or log; the first (verify's own canary (Phase 4), in a scratch copy: beneficiary account type 8 mapped to 'CON' instead of 'ESP' (RULE-004/RULE-005, lines 968-972)) made 1 more test(s) fail than the clean run (analysis/debcred/equivalence/canary/sp_debcred_empresa/verify-prodcre8). 5 more are only claimed.",
+        "Canary: 6 canary run(s) shown by a result file or log; the first (verify's own canary (Phase 4), in a scratch copy: beneficiary account type 8 mapped to 'CON' instead of 'ESP' (RULE-004/RULE-005, lines 968-972)) made 1 more test(s) fail than the clean run (analysis/debcred/equivalence/canary/sp_debcred_empresa/verify-prodcre8). 6 more are only claimed.",
         "Source untouched: legacy/debcred is untouched: no file changed after the analysis started (1 files compared). Checked by modification time, and no version-control tool was run."
       ],
       "checks": [
@@ -48,7 +48,7 @@
           "id": "tests",
           "label": "Tests ran",
           "state": "pass",
-          "detail": "498 test(s) executed, 0 failed, 0 skipped. Note: Phases 1-4 in scope (all code blocks of the procedure). Called procedures are in-memory doubles; JDBC adapter tests use mocks, not a real ASE."
+          "detail": "499 test(s) executed, 0 failed, 0 skipped. Note: Phases 1-4 in scope (all code blocks of the procedure). Called procedures are in-memory doubles; JDBC adapter tests use mocks, not a real ASE."
         },
         {
           "id": "rules",
@@ -72,7 +72,7 @@
           "id": "canary",
           "label": "Canary",
           "state": "pass",
-          "detail": "5 canary run(s) shown by a result file or log; the first (verify's own canary (Phase 4), in a scratch copy: beneficiary account type 8 mapped to 'CON' instead of 'ESP' (RULE-004/RULE-005, lines 968-972)) made 1 more test(s) fail than the clean run (analysis/debcred/equivalence/canary/sp_debcred_empresa/verify-prodcre8). 5 more are only claimed."
+          "detail": "6 canary run(s) shown by a result file or log; the first (verify's own canary (Phase 4), in a scratch copy: beneficiary account type 8 mapped to 'CON' instead of 'ESP' (RULE-004/RULE-005, lines 968-972)) made 1 more test(s) fail than the clean run (analysis/debcred/equivalence/canary/sp_debcred_empresa/verify-prodcre8). 6 more are only claimed."
         },
         {
           "id": "source",
@@ -83,7 +83,7 @@
       ],
       "evidence": {
         "tests": {
-          "executed": 498,
+          "executed": 499,
           "failed": 0,
           "skipped": 0,
           "skippedNoReason": 0,
@@ -96,8 +96,8 @@
               "note": "Phases 1-4 in scope (all code blocks of the procedure). Called procedures are in-memory doubles; JDBC adapter tests use mocks, not a real ASE.",
               "source": "result files",
               "files": 32,
-              "written": "2026-09-28 04:54 UTC",
-              "executed": 498,
+              "written": "2026-09-28 05:02 UTC",
+              "executed": 499,
               "failed": 0,
               "skipped": 0
             }
@@ -224,6 +224,14 @@
             ]
           },
           {
+            "change": "A19-b canary, in a scratch copy: the debit value replaced only when the ordered value is non-null (RULE-003, line 886)",
+            "testsFailed": 1,
+            "shown": true,
+            "where": [
+              "analysis/debcred/equivalence/canary/sp_debcred_empresa/a19b-null-ordered"
+            ]
+          },
+          {
             "change": "transform's canary (Phase 4): sp_eventos return status ignored, line 1248 (RULE-034)",
             "testsFailed": 10,
             "shown": true,
@@ -278,12 +286,6 @@
             "testsFailed": 12,
             "shown": false,
             "where": []
-          },
-          {
-            "change": "a notifier raiserror thrown instead of carried on (review H1)",
-            "testsFailed": 2,
-            "shown": false,
-            "where": []
           }
         ]
       },
@@ -310,7 +312,7 @@
             "where": "Phase 5 exit criterion"
           },
           {
-            "text": "A19: Open from the Phase 4 review (2026-09-27). (a) Which row a multi-row scalar read keeps (interbank and beneficiary detail by order only, classification): the legacy's is undefined, the service takes the first. (b) TRANSCLI/TARJCRED/COMEXT with a NULL ordered value: the legacy records the moveme\u2026",
+            "text": "A20: To confirm on the bank's test ASE (from the Phase 4 review, 2026-09-27): the COBIS `raiserror` + return-code convention through jTDS (the notifiers already carry on; exits A and B would need the same), `convert(varchar(11), money)` over 100,000,000.00, jTDS `prepareSQL` inside `begin tran` and\u2026",
             "where": "open question, section 7"
           }
         ],
@@ -324,7 +326,7 @@
         "A test that names a rule shows the rule is mentioned, not that the test is a good one. The canary shows only that some test can fail.",
         "It does not replace the review and sign-off of the people who own the system."
       ],
-      "verifiedAt": "2026-09-28 04:55 UTC"
+      "verifiedAt": "2026-09-28 05:03 UTC"
     }
   ],
   "toolingOnly": [],
