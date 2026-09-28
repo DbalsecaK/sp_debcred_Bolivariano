@@ -8,7 +8,7 @@ package com.nexti.debcred;
  */
 public interface AseSession extends AseTransaction, AutoCloseable, CommissionTariffPort, AccountingConfigurationPort,
         DebitNotePort, VirtualDebitNotePort, LedgerDebitPort, MovementPort, ErrorReportingPort, CatalogReader,
-        VirtualAccountReader, OrderReader, CommissionPort {
+        VirtualAccountReader, OrderReader, CommissionPort, OrderHeaderRepository {
 
     @Override
     default void close() {

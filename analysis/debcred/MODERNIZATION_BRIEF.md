@@ -105,11 +105,11 @@ Modules: B12, ds:db_biz_pagos..bp_total_orden, ds:db_sat_his..bp_total_orden_his
 Scale: S
 Risk: Medium; (1) the four near-identical branches (channel × `@i_opcion` × payment forms, `CHL` vs `CHE`) and the live-then-history fallback with `@@rowcount` — mitigation: a property-based test over the branch matrix and a test per fallback; (2) the exempt-service list at `:2080` and the stale `@wRowdbBiz` when `@i_opcion` is outside `01–03` are preserved (parity) — mitigation: pinned by tests named after RULE-010 and RULE-014, with the quirk documented.
 Entry criteria:
-- [ ] Phase 2 exit criteria met.
-- [ ] §7 A5: DDL of `bp_total_orden` and `bp_total_orden_his`, or the columns `te_estado_proceso`, `te_codigo_error`, `te_frm_pagcob` confirmed.
+- [x] Phase 2 exit criteria met. *(2026-09-27: both Phase 2 exit criteria ticked with evidence; TRANSFORMATION_NOTES.md "Phase 2".)*
+- [x] §7 A5: DDL of `bp_total_orden` and `bp_total_orden_his`, or the columns `te_estado_proceso`, `te_codigo_error`, `te_frm_pagcob` confirmed. *(2026-09-27: §7 A5 rules "not available; assumed contracts accepted"; columns te_orden_banco, te_frm_pagcob, te_servicio, te_estado_proceso, te_codigo_error are the ones the legacy UPDATEs name, lines 1886-2066.)*
 Exit criteria:
-- [ ] Characterization tests pass for RULE-014, 018, 009.
-- [ ] End-to-end walkthrough 1 (§4) passes with the notification step stubbed.
+- [x] Characterization tests pass for RULE-014, 018, 009. *(2026-09-27, transform Phase 3: 286 tests, 0 failures. Proposed revision: the ids predate the round-3 renumbering; the tests pin RULE-014, 018, 010.)*
+- [x] End-to-end walkthrough 1 (§4) passes with the notification step stubbed. *(2026-09-27: Walkthrough1EndToEndTest, full call sequence and committed state, notification step stubbed.)*
 
 #### Phase 4 — Notifications
 Command: /code-modernization:modernize-transform

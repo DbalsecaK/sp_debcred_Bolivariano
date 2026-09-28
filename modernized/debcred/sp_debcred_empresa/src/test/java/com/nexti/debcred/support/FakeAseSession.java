@@ -3,11 +3,13 @@ package com.nexti.debcred.support;
 import java.math.BigDecimal;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
@@ -43,7 +45,9 @@ import com.nexti.debcred.NotificationContext;
 import com.nexti.debcred.NotificationOutcome;
 import com.nexti.debcred.NotificationStep;
 import com.nexti.debcred.OrderHeaderContext;
+import com.nexti.debcred.OrderHeaderRepository;
 import com.nexti.debcred.OrderHeaderStep;
+import com.nexti.debcred.OrderHeaderTransition;
 import com.nexti.debcred.OrderReader;
 import com.nexti.debcred.VirtualAccountReader;
 import com.nexti.debcred.VirtualDebitNoteCommand;
@@ -68,12 +72,43 @@ import com.nexti.debcred.VirtualDebitNoteResult;
  * {@code "commissionStep"} and recording the {@link CommissionContext}, so the Phase 1 sequence
  * assertions still hold.
  *
+ * <p>Phase 3: the session is also the {@link OrderHeaderRepository} ({@code bp_total_orden} and
+ * {@code db_sat_his..bp_total_orden_his}, lines 1886-1920). Each table is an in-memory list of header
+ * rows (order, payment form, service, state, error code) scripted with {@link #headerRow} /
+ * {@link #historyHeaderRow}. An update applies the legacy WHERE clause with Sybase semantics
+ * (trailing blanks ignored, NULL never equal, {@code isnull(state,'I') = 'I'}) and returns
+ * {@code @@rowcount}. The row changes follow the transaction model: {@code begin} and
+ * {@code savepoint} snapshot the tables, {@code rollback}/{@code rollbackToSavepoint} restore the
+ * snapshot, {@code commit} keeps the changes; outside a transaction they apply at once. The header
+ * updates are table UPDATEs, not procedure calls: they are logged in {@link #headerUpdates()} and
+ * NOT in {@link #calls()} / {@link #committedWrites()}, which keep meaning "procedure calls" and
+ * "procedure writes" exactly as in Phase 1/2. The committed result is read with
+ * {@link #headerState}/{@link #historyHeaderState} after the service returned.
+ *
+ * <p>A session whose header tables were never scripted (every Phase 1/2 test, which predate B12)
+ * behaves as if the order header existed in state I for whatever the step asks: the live update
+ * answers 1 row and changes nothing. Phase 3 tests always script rows or call
+ * {@link #noHeaderRows()}. {@link #service()} wires the real {@link OrderHeaderTransition} behind a
+ * thin wrapper that keeps logging {@code "orderHeaderStep"} and recording the context.
+ *
  * <p>Fixture accessors such as {@link #onlyDebitNote()} throw an {@link AssertionError} when the
  * call did not happen: a test never passes because the thing it inspects is missing.
  */
-public final class FakeAseSession implements AseSession, NotificationStep, OrderHeaderStep {
+public final class FakeAseSession implements AseSession, NotificationStep {
 
     public static final String SAVEPOINT = "sp_debito_empresa";
+
+    /** The two order-header tables of B12. */
+    public enum HeaderTable { LIVE, HISTORY }
+
+    /** One order-header row ({@code te_orden_banco, te_frm_pagcob, te_servicio, te_estado_proceso, te_codigo_error}). */
+    public record HeaderRow(Integer order, String form, String service, String state, Integer codError) {
+    }
+
+    /** One UPDATE the step issued: table, the WHERE arguments, the code written, {@code @@rowcount} ({@code -1} = it raised {@code @@error}). */
+    public record HeaderUpdate(HeaderTable table, Integer ordenBanco, List<String> paymentForms, String servicio,
+                               int codError, int rowCount) {
+    }
 
     /** One recorded write with the procedure name and its argument record. */
     public record Write(String procedure, Object payload) {
@@ -126,6 +161,15 @@ public final class FakeAseSession implements AseSession, NotificationStep, Order
     private final List<Integer> historyOrderLookups = new ArrayList<>();
     private int catalogReads;
 
+    // ---- Phase 3: order-header tables ----------------------------------------------------------
+    private final Map<HeaderTable, List<HeaderRow>> headerTables = new HashMap<>(Map.of(
+            HeaderTable.LIVE, new ArrayList<>(), HeaderTable.HISTORY, new ArrayList<>()));
+    private boolean headersScripted;
+    private final Set<HeaderTable> headerUpdateThrows = new HashSet<>();
+    private final List<HeaderUpdate> headerUpdates = new ArrayList<>();
+    private Map<HeaderTable, List<HeaderRow>> headerSnapshotAtBegin;
+    private final Map<String, Map<HeaderTable, List<HeaderRow>>> headerSnapshotAtSavepoint = new HashMap<>();
+
     public FakeAseSession() {
         accountingResults.add(new AccountingConfiguration(0, 2701, "0150"));
     }
@@ -142,7 +186,13 @@ public final class FakeAseSession implements AseSession, NotificationStep, Order
             commissionSteps.add(ctx);
             return debits.apply(ctx);
         };
-        return new DebitCompanyAccountService(this, this, logged, this);
+        OrderHeaderTransition transition = new OrderHeaderTransition(this);
+        OrderHeaderStep loggedHeader = ctx -> {
+            calls.add("orderHeaderStep");
+            orderHeaderSteps.add(ctx);
+            return transition.update(ctx);
+        };
+        return new DebitCompanyAccountService(this, this, logged, loggedHeader);
     }
 
     // ---- scripting -----------------------------------------------------------------------------
@@ -248,6 +298,32 @@ public final class FakeAseSession implements AseSession, NotificationStep, Order
         return this;
     }
 
+    /** A row of {@code bp_total_orden}; {@code state} null is a NULL {@code te_estado_proceso}. */
+    public FakeAseSession headerRow(int order, String form, String service, String state) {
+        headersScripted = true;
+        headerTables.get(HeaderTable.LIVE).add(new HeaderRow(order, form, service, state, null));
+        return this;
+    }
+
+    /** A row of {@code db_sat_his..bp_total_orden_his}. */
+    public FakeAseSession historyHeaderRow(int order, String form, String service, String state) {
+        headersScripted = true;
+        headerTables.get(HeaderTable.HISTORY).add(new HeaderRow(order, form, service, state, null));
+        return this;
+    }
+
+    /** Both header tables exist and are empty: every update answers 0 rows. */
+    public FakeAseSession noHeaderRows() {
+        headersScripted = true;
+        return this;
+    }
+
+    /** The UPDATE on that table raises a SQL error ({@code @@error <> 0}, never checked by the legacy). */
+    public FakeAseSession headerUpdateThrows(HeaderTable table) {
+        headerUpdateThrows.add(table);
+        return this;
+    }
+
     // ---- AseTransaction ------------------------------------------------------------------------
 
     @Override
@@ -257,6 +333,8 @@ public final class FakeAseSession implements AseSession, NotificationStep, Order
         begins++;
         pending.clear();
         savepoints.clear();
+        headerSnapshotAtBegin = copyHeaders();
+        headerSnapshotAtSavepoint.clear();
     }
 
     @Override
@@ -266,6 +344,7 @@ public final class FakeAseSession implements AseSession, NotificationStep, Order
             throw new IllegalStateException("save tran outside a transaction");
         }
         savepoints.put(name, pending.size());
+        headerSnapshotAtSavepoint.put(name, copyHeaders());
     }
 
     @Override
@@ -276,6 +355,7 @@ public final class FakeAseSession implements AseSession, NotificationStep, Order
             throw new IllegalStateException("unknown savepoint " + name);
         }
         pending.subList(position, pending.size()).clear();
+        restoreHeaders(headerSnapshotAtSavepoint.get(name));
     }
 
     @Override
@@ -285,6 +365,8 @@ public final class FakeAseSession implements AseSession, NotificationStep, Order
             throw new IllegalStateException("rollback tran with @@trancount = 0");
         }
         pending.clear();
+        restoreHeaders(headerSnapshotAtBegin);
+        headerSnapshotAtBegin = null;
         inTransaction = false;
         rollbacks++;
     }
@@ -297,6 +379,8 @@ public final class FakeAseSession implements AseSession, NotificationStep, Order
         }
         committed.addAll(pending);
         pending.clear();
+        headerSnapshotAtBegin = null;
+        headerSnapshotAtSavepoint.clear();
         inTransaction = false;
         commits++;
     }
@@ -401,11 +485,74 @@ public final class FakeAseSession implements AseSession, NotificationStep, Order
         return swift ? secondCommissionResult : commissionResult;
     }
 
+    // ---- OrderHeaderRepository (bp_total_orden 1886-1898, bp_total_orden_his 1908-1920) ----------
+
     @Override
-    public int update(OrderHeaderContext ctx) {
-        calls.add("orderHeaderStep");
-        orderHeaderSteps.add(ctx);
-        return 0;
+    public int markLiveInTransition(Integer ordenBanco, List<String> paymentForms, String servicio, int codError) {
+        return headerUpdate(HeaderTable.LIVE, ordenBanco, paymentForms, servicio, codError);
+    }
+
+    @Override
+    public int markHistoryInTransition(Integer ordenBanco, List<String> paymentForms, String servicio, int codError) {
+        return headerUpdate(HeaderTable.HISTORY, ordenBanco, paymentForms, servicio, codError);
+    }
+
+    private int headerUpdate(HeaderTable table, Integer ordenBanco, List<String> paymentForms, String servicio,
+                             int codError) {
+        List<String> forms = Collections.unmodifiableList(new ArrayList<>(paymentForms));   // may hold a NULL
+        if (headerUpdateThrows.contains(table)) {
+            headerUpdates.add(new HeaderUpdate(table, ordenBanco, forms, servicio, codError, -1));
+            throw new AsePortException("simulated @@error on update " + table);
+        }
+        if (!headersScripted) {
+            // Phase 1/2 fixtures: the header exists in state I for whatever the step asks.
+            int rows = table == HeaderTable.LIVE ? 1 : 0;
+            headerUpdates.add(new HeaderUpdate(table, ordenBanco, forms, servicio, codError, rows));
+            return rows;
+        }
+        List<HeaderRow> rows = headerTables.get(table);
+        int count = 0;
+        for (int i = 0; i < rows.size(); i++) {
+            HeaderRow row = rows.get(i);
+            boolean formMatches = forms.stream().anyMatch(f -> aseEquals(row.form(), f));
+            boolean stateInitial = row.state() == null || aseEquals(row.state(), "I");
+            if (ordenBanco != null && Objects.equals(row.order(), ordenBanco) && formMatches
+                    && aseEquals(row.service(), servicio) && stateInitial) {
+                rows.set(i, new HeaderRow(row.order(), row.form(), row.service(), "T", codError));
+                count++;
+            }
+        }
+        headerUpdates.add(new HeaderUpdate(table, ordenBanco, forms, servicio, codError, count));
+        return count;
+    }
+
+    /** Sybase {@code =} on char/varchar: trailing blanks ignored, NULL never equal. */
+    private static boolean aseEquals(String a, String b) {
+        return a != null && b != null && stripBlanks(a).equals(stripBlanks(b));
+    }
+
+    private static String stripBlanks(String s) {
+        int end = s.length();
+        while (end > 0 && s.charAt(end - 1) == ' ') {
+            end--;
+        }
+        return s.substring(0, end);
+    }
+
+    private Map<HeaderTable, List<HeaderRow>> copyHeaders() {
+        Map<HeaderTable, List<HeaderRow>> copy = new HashMap<>();
+        headerTables.forEach((t, rows) -> copy.put(t, new ArrayList<>(rows)));
+        return copy;
+    }
+
+    private void restoreHeaders(Map<HeaderTable, List<HeaderRow>> snapshot) {
+        if (snapshot == null) {
+            return;
+        }
+        snapshot.forEach((t, rows) -> {
+            headerTables.get(t).clear();
+            headerTables.get(t).addAll(rows);
+        });
     }
 
     @Override
@@ -560,6 +707,46 @@ public final class FakeAseSession implements AseSession, NotificationStep, Order
 
     public OrderHeaderContext onlyOrderHeaderStep() {
         return only(orderHeaderSteps, "orderHeaderStep");
+    }
+
+    /** Every header UPDATE issued, in order (both tables). */
+    public List<HeaderUpdate> headerUpdates() {
+        return List.copyOf(headerUpdates);
+    }
+
+    /** The payment forms of the only header UPDATE issued; fails if there was not exactly one. */
+    public List<String> onlyHeaderUpdateForms() {
+        return only(headerUpdates, "header update").paymentForms();
+    }
+
+    /** The current rows of one header table (the committed state once the service returned). */
+    public List<HeaderRow> headerRows(HeaderTable table) {
+        return List.copyOf(headerTables.get(table));
+    }
+
+    /** {@code te_estado_proceso} of the only live row with that exact key; fails if there is not exactly one. */
+    public String headerState(int order, String form, String service) {
+        return onlyRow(HeaderTable.LIVE, order, form, service).state();
+    }
+
+    public String historyHeaderState(int order, String form, String service) {
+        return onlyRow(HeaderTable.HISTORY, order, form, service).state();
+    }
+
+    public Integer headerCodError(int order, String form, String service) {
+        return onlyRow(HeaderTable.LIVE, order, form, service).codError();
+    }
+
+    public Integer historyHeaderCodError(int order, String form, String service) {
+        return onlyRow(HeaderTable.HISTORY, order, form, service).codError();
+    }
+
+    private HeaderRow onlyRow(HeaderTable table, int order, String form, String service) {
+        List<HeaderRow> found = headerTables.get(table).stream()
+                .filter(r -> Objects.equals(r.order(), order) && Objects.equals(r.form(), form)
+                        && Objects.equals(r.service(), service))
+                .toList();
+        return only(found, table + " header row " + order + "/" + form + "/" + service);
     }
 
     public List<String> basicAccountChecks() {

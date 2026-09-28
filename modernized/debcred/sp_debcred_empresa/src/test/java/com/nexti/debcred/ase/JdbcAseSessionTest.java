@@ -201,6 +201,92 @@ class JdbcAseSessionTest {
                 .hasMessageContaining("fix the positional call");
     }
 
+    @Test
+    void rule014_rule018_headerUpdatesBindTheInListAndTargetLiveThenHistoryTables() throws SQLException {
+        java.sql.PreparedStatement update = mock(java.sql.PreparedStatement.class);
+        when(connection.prepareStatement(anyString())).thenReturn(update);
+        when(update.executeUpdate()).thenReturn(2, 0);
+        JdbcAseSession session = new JdbcAseSession(connection, "cobis");
+
+        int live = session.markLiveInTransition(123456, List.of("CUE", "EFE", "CHL"), "ROLPAGO", 0);
+        int history = session.markHistoryInTransition(123456, java.util.Collections.singletonList(null), "ROLPAGO", 0);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection, times(2)).prepareStatement(sql.capture());
+        assertThat(sql.getAllValues().get(0)).isEqualTo("update cobis..bp_total_orden set te_estado_proceso = 'T', "
+                + "te_codigo_error = ? where te_orden_banco = ? and te_frm_pagcob in (?, ?, ?) and te_servicio = ? "
+                + "and isnull(te_estado_proceso, 'I') = 'I'");
+        assertThat(sql.getAllValues().get(1)).startsWith("update db_sat_his..bp_total_orden_his set")
+                .contains("te_frm_pagcob in (?) and");
+        verify(update, times(2)).setInt(1, 0);
+        verify(update).setString(3, "CUE");
+        verify(update).setString(5, "CHL");
+        verify(update).setString(6, "ROLPAGO");
+        verify(update).setString(3, null);
+        assertThat(live).isEqualTo(2);
+        assertThat(history).isZero();
+    }
+
+    @Test
+    void rule014_aFailedHeaderUpdateIsAnAsePortException() throws SQLException {
+        java.sql.PreparedStatement update = mock(java.sql.PreparedStatement.class);
+        when(connection.prepareStatement(anyString())).thenReturn(update);
+        when(update.executeUpdate()).thenThrow(new SQLException("lock timeout", "HYT00", 12205));
+
+        assertThatThrownBy(() -> new JdbcAseSession(connection, "cobis")
+                .markLiveInTransition(1, List.of("COB"), "PAGOPRV", 0)).isInstanceOf(AsePortException.class);
+    }
+
+    @Test
+    void h1_aDeadlockInsideTheTransactionIsATransactionLossAndCommitRefusesToReportSuccess() throws SQLException {
+        java.sql.PreparedStatement update = mock(java.sql.PreparedStatement.class);
+        when(connection.prepareStatement(anyString())).thenReturn(update);
+        when(update.executeUpdate()).thenThrow(new SQLException("deadlock", "40001", 1205));
+        JdbcAseSession session = new JdbcAseSession(connection, "cobis");
+        session.begin();
+
+        assertThatThrownBy(() -> session.markLiveInTransition(1, List.of("CUE"), "ROLPAGO", 0))
+                .isInstanceOf(com.nexti.debcred.AseTransactionAbortedException.class);
+        assertThatThrownBy(session::commit).isInstanceOf(com.nexti.debcred.AseTransactionAbortedException.class);
+        session.rollback();                                   // no second "rollback tran" against @@trancount 0
+        session.close();
+        verify(statement, never()).execute("rollback tran");
+        verify(statement, never()).execute("commit tran");
+    }
+
+    @Test
+    void h1_commitWithTrancountZeroIsRefused() throws SQLException {
+        ResultSet count = mock(ResultSet.class);
+        when(statement.executeQuery("select @@trancount")).thenReturn(count);
+        when(count.next()).thenReturn(true);
+        when(count.getInt(1)).thenReturn(0);
+        JdbcAseSession session = new JdbcAseSession(connection, "cobis");
+        session.begin();
+
+        assertThatThrownBy(session::commit).isInstanceOf(com.nexti.debcred.AseTransactionAbortedException.class);
+        verify(statement, never()).execute("commit tran");
+    }
+
+    @Test
+    void h1_commitWithAnOpenTransactionCommits() throws SQLException {
+        ResultSet count = mock(ResultSet.class);
+        when(statement.executeQuery("select @@trancount")).thenReturn(count);
+        when(count.next()).thenReturn(true);
+        when(count.getInt(1)).thenReturn(1);
+        JdbcAseSession session = new JdbcAseSession(connection, "cobis");
+        session.begin();
+
+        session.commit();
+
+        verify(statement).execute("commit tran");
+    }
+
+    @Test
+    void m2_anEmptyPaymentFormListMatchesNothingWithoutSql() throws SQLException {
+        assertThat(new JdbcAseSession(connection, "cobis").markLiveInTransition(1, List.of(), "ROLPAGO", 0)).isZero();
+        verify(connection, never()).prepareStatement(anyString());
+    }
+
     /** A metadata result set that yields one IN column per name, in order. */
     private static ResultSet columns(List<String> names) throws SQLException {
         ResultSet rs = mock(ResultSet.class);

@@ -19,18 +19,20 @@ import tools.jackson.databind.ObjectMapper;
 
 /**
  * Table-driven equivalence cases from {@code src/test/resources/golden/phase1-cases.json} (the
- * three exits of Phase 1) and {@code phase2-cases.json} (the commission blocks and exit B): one
+ * three exits of Phase 1), {@code phase2-cases.json} (the commission blocks and exit B) and
+ * {@code phase3-cases.json} (the order-header update B12, RULE-014/018/010): one
  * dynamic test per case, each named with its rule ids. The files are the shape the bank's recorded
  * outputs (brief section 7 A6) will take, so a future dual run can feed the same rows to the T-SQL
  * procedure and to the service.
  *
  * <p>A missing or empty fixture is a FAILURE, never a skip: a suite that is green because nothing
  * ran proves nothing. The factory also emits a final test that reports how many cases executed
- * across both files.
+ * across all files.
  */
 class GoldenCasesTest {
 
-    private static final List<String> FIXTURES = List.of("/golden/phase1-cases.json", "/golden/phase2-cases.json");
+    private static final List<String> FIXTURES = List.of("/golden/phase1-cases.json", "/golden/phase2-cases.json",
+            "/golden/phase3-cases.json");
 
     @TestFactory
     List<DynamicTest> goldenCases() throws IOException {
@@ -82,6 +84,24 @@ class GoldenCasesTest {
         if (c.hasNonNull("secondCommissionReturnCode")) {
             ase.secondCommission(c.get("secondCommissionReturnCode").asInt(), c.get("secondCommissionOError").asInt());
         }
+        // Phase 3 inputs (optional; absent = unscripted header tables, the Phase 1/2 fixture)
+        if (c.has("headerRows")) {
+            ase.noHeaderRows();
+            for (JsonNode h : c.get("headerRows")) {
+                String state = text(h, "state");
+                if ("HISTORY".equals(h.get("table").asText())) {
+                    ase.historyHeaderRow(h.get("order").asInt(), text(h, "form"), text(h, "service"), state);
+                } else {
+                    ase.headerRow(h.get("order").asInt(), text(h, "form"), text(h, "service"), state);
+                }
+            }
+        }
+        if (c.has("headerThrows")) {
+            c.get("headerThrows").forEach(t -> ase.headerUpdateThrows(FakeAseSession.HeaderTable.valueOf(t.asText())));
+        }
+        if (c.hasNonNull("liveOrderService")) {
+            ase.liveOrder(Requests.BANK_ORDER, c.get("liveOrderService").asText());
+        }
         Requests request = Requests.currentAccount()
                 .tipctaEmp(c.get("accountType").asInt())
                 .servicio(c.get("service").asText())
@@ -101,6 +121,21 @@ class GoldenCasesTest {
         }
         if (c.has("frmPagcobSpi")) {
             request.frmPagcobSpi(text(c, "frmPagcobSpi"));
+        }
+        if (c.has("canal")) {
+            request.canal(text(c, "canal"));
+        }
+        if (c.has("opcion")) {
+            request.opcion(text(c, "opcion"));
+        }
+        if (c.has("frmPagcob")) {
+            request.frmPagcob(text(c, "frmPagcob"));
+        }
+        if (c.has("frmPagcobDeb")) {
+            request.frmPagcobDeb(text(c, "frmPagcobDeb"));
+        }
+        if (c.has("tipoAfec")) {
+            request.tipoAfec(text(c, "tipoAfec"));
         }
 
         DebitResult result = ase.service().debit(request.build());
@@ -130,6 +165,18 @@ class GoldenCasesTest {
         assertThat(ase.committedProcedures()).as("committed writes").containsExactlyElementsOf(committed);
         assertThat(!ase.errorReports().isEmpty()).as("sp_cerror called").isEqualTo(e.get("cerror").asBoolean());
         assertThat(ase.transactionOpen()).as("transaction left open").isFalse();
+        if (e.has("headerUpdates")) {
+            assertThat(ase.headerUpdates()).as("header UPDATE statements issued").hasSize(e.get("headerUpdates").asInt());
+        }
+        if (e.has("headerStates")) {
+            for (JsonNode h : e.get("headerStates")) {
+                int order = h.get("order").asInt();
+                String state = "HISTORY".equals(h.get("table").asText())
+                        ? ase.historyHeaderState(order, text(h, "form"), text(h, "service"))
+                        : ase.headerState(order, text(h, "form"), text(h, "service"));
+                assertThat(state).as("state of %s", h).isEqualTo(text(h, "state"));
+            }
+        }
     }
 
     /** A JSON null is a T-SQL NULL for the money/text builders. */

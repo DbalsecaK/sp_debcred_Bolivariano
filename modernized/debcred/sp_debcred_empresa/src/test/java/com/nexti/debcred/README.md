@@ -1,4 +1,4 @@
-# Characterization tests: `sp_debcred_empresa` (Phase 1 + Phase 2)
+# Characterization tests: `sp_debcred_empresa` (Phase 1 + Phase 2 + Phase 3)
 
 These tests pin what `legacy/debcred/sp_debcred_empresa.sp` **actually does** in blocks B0-B6,
 B8, B9, B14 and B15 (lines 1-740, 1260-1492, 2130-2170) so the Java service can be proven
@@ -40,7 +40,12 @@ JUnit Platform through Surefire; jqwik keeps its failure database under `target/
 | `Rule013Rule001Rule025Rule039CommissionTest` | B10 (1496-1600) | RULE-013 (P0), RULE-001, RULE-025, RULE-039 |
 | `Rule013ExitBTest` | exit B (1606-1732) | RULE-013 (P0), brief A14 |
 | `Rule016Rule017SecondSwiftCommissionTest` | B11 (1742-1856) | RULE-016, RULE-017 |
-| `GoldenCasesTest` + `resources/golden/phase1-cases.json` + `phase2-cases.json` | the four exits | table-driven, one dynamic test per case, one count over both files |
+| `Rule014OrderHeaderTransitionTest` | B12 (1876-2070) | RULE-014 (P0), RULE-018, RULE-020, RULE-025, RULE-037 |
+| `Rule014OrderHeaderMatrixPropertyTest` (jqwik) | B12 (1876-2090), full matrix | RULE-014 (P0), RULE-018, RULE-010 |
+| `Rule018HistoryFallbackTest` | B12 history fallback (1898-1924 and siblings) | RULE-018, RULE-010 |
+| `Rule010NoHeaderUpdatedTest` | 2076-2090, stale `@wRowdbBiz`, `@@error` parity | RULE-010, RULE-014, RULE-023, RULE-024, RULE-028 |
+| `Walkthrough1EndToEndTest` | brief section 4, walkthrough 1 | RULE-009, RULE-012, RULE-013, RULE-014 |
+| `GoldenCasesTest` + `resources/golden/phase1-cases.json` + `phase2-cases.json` + `phase3-cases.json` | the four exits and B12 | table-driven, one dynamic test per case, one count over all files |
 | `support/FakeAseSession` | the ASE connection | records call order and committed state |
 | `support/Requests` | the 45 inputs | fake fixture values |
 
@@ -64,6 +69,12 @@ so `trace_rules.py` can find them.
   `commissionCommands()` are what the port received; `lastMovement()` is the exit-B 'X' movement
   (the second `sp_grb_mov_y_frmpgo` call); `secondMovement(returnCode)` scripts its answer. The
   step under test is the real `CommissionDebits`, wired by `service()`.
+- Phase 3: the order-header tables are scripted with `headerRow(order, form, service, state)`,
+  `historyHeaderRow(...)`, `noHeaderRows()` and `headerUpdateThrows(HeaderTable.LIVE|HISTORY)`;
+  `headerUpdates()` lists every UPDATE with its `@@rowcount`; `headerState(...)`,
+  `historyHeaderState(...)` and `headerRows(table)` read the committed rows. The header UPDATEs are
+  not in `calls()`/`committedWrites()`. Unscripted header tables answer 1 row (the Phase 1/2
+  fixtures). The step under test is the real `OrderHeaderTransition`, wired by `service()`.
 
 `onlyX()` accessors throw when the call did not happen exactly once: a test cannot pass because the
 thing it inspects is missing. `GoldenCasesTest` fails if its JSON fixture is missing or empty and

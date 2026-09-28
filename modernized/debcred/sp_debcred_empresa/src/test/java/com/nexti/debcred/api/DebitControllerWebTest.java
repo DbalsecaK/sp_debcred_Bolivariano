@@ -22,6 +22,7 @@ import com.nexti.debcred.CommissionDebits;
 import com.nexti.debcred.DebitCompanyAccountService;
 import com.nexti.debcred.DebitFlow;
 import com.nexti.debcred.NotificationOutcome;
+import com.nexti.debcred.OrderHeaderTransition;
 import com.nexti.debcred.ase.AseSessionFactory.SessionOpener;
 import com.nexti.debcred.ase.AseUnavailableException;
 import com.nexti.debcred.support.FakeAseSession;
@@ -55,7 +56,7 @@ class DebitControllerWebTest {
         @Bean
         DebitFlow debitFlow() {
             return ase -> new DebitCompanyAccountService(ase, context -> NotificationOutcome.notConfigured(),
-                    new CommissionDebits(ase, ase, ase), context -> 0);
+                    new CommissionDebits(ase, ase, ase), new OrderHeaderTransition(ase));   // Phase 3: the real B12 step
         }
     }
 

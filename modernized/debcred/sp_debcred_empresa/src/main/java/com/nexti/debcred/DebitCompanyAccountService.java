@@ -177,8 +177,15 @@ public class DebitCompanyAccountService {
             case CommissionOutcome.ExitB b -> new DebitResult(b.oError(), b.oError(), null);       // 1698-1700, no commit
             case CommissionOutcome.LblError e -> errorExit(request, e.numError(), true);          // 1834
             case CommissionOutcome.Continue c -> {
-                // B12 (Phase 3 step), then success (2130-2136)
-                orderHeader.update(new OrderHeaderContext(request, servicio, frmPagcobDeb, actTotord, posted.codErrord()));
+                // B12 (1862-2090): 122004 goes to lbl_error; otherwise success (2130-2136).
+                // priorRowCount is @wRowdbBiz as B12 finds it, NOT "the last @@rowcount". TODO Phase 4: set it
+                // exactly where the legacy does: 824/840 and 890/912 (B7 reads), 1358 (SPI-return lookup, only
+                // when actTotord is already 'N'). Until then it is the declared NULL (line 140).
+                int numError = orderHeader.update(new OrderHeaderContext(request, servicio, frmPagcobDeb, actTotord,
+                        posted.codErrord(), null));
+                if (numError != 0) {
+                    yield errorExit(request, numError, true);
+                }
                 tx.commit();
                 yield new DebitResult(0, 0, null);
             }

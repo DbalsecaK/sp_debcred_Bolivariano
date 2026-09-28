@@ -9,6 +9,7 @@ import java.sql.Statement;
 import java.sql.Timestamp;
 import java.sql.Types;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.regex.Pattern;
 
@@ -19,6 +20,7 @@ import com.nexti.debcred.AccountingConfiguration;
 import com.nexti.debcred.AccountingConfigurationQuery;
 import com.nexti.debcred.AsePortException;
 import com.nexti.debcred.AseSession;
+import com.nexti.debcred.AseTransactionAbortedException;
 import com.nexti.debcred.CommissionCommand;
 import com.nexti.debcred.CommissionResult;
 import com.nexti.debcred.CommissionTariffQuery;
@@ -60,6 +62,7 @@ public final class JdbcAseSession implements AseSession {
     private final Connection connection;
     private final String cobis;
     private boolean inTransaction;
+    private boolean transactionLost;
     private String lastStatement = "(none)";
 
     JdbcAseSession(Connection connection, String cobisDatabase) throws SQLException {
@@ -88,20 +91,53 @@ public final class JdbcAseSession implements AseSession {
 
     @Override
     public void rollback() {
+        if (transactionLost) {
+            inTransaction = false;             // ASE already rolled it back; a second rollback would fail (3903)
+            return;
+        }
         execute("rollback tran");
         inTransaction = false;
     }
 
+    /**
+     * {@code commit tran}, refusing to report success when ASE already ended the transaction
+     * ({@code @@trancount = 0}): a commit then commits nothing (review Phase 3 H1).
+     */
     @Override
     public void commit() {
+        if (transactionLost || tranCount() == 0) {
+            inTransaction = false;
+            throw new AseTransactionAbortedException("commit tran with @@trancount = 0: the debit was not persisted", null);
+        }
         execute("commit tran");
         inTransaction = false;
+    }
+
+    private int tranCount() {
+        try (Statement s = connection.createStatement(); ResultSet rs = s.executeQuery("select @@trancount")) {
+            return rs.next() ? rs.getInt(1) : 0;
+        } catch (SQLException e) {
+            throw failure("select @@trancount", e);
+        }
+    }
+
+    /**
+     * A JDBC failure as {@link AsePortException}, or as {@link AseTransactionAbortedException} when ASE ended
+     * the transaction: deadlock victim (1205) or a connection-class SQLState (08xxx).
+     */
+    private AsePortException failure(String what, SQLException e) {
+        boolean lost = e.getErrorCode() == 1205 || (e.getSQLState() != null && e.getSQLState().startsWith("08"));
+        if (lost && inTransaction) {
+            transactionLost = true;
+            return new AseTransactionAbortedException(what + " failed and ASE ended the transaction", e);
+        }
+        return new AsePortException(what + " failed", e);
     }
 
     @Override
     public void close() {
         try {
-            if (inTransaction) {
+            if (inTransaction && !transactionLost) {
                 log.warn("ASE session closed with a transaction open after {}: rolling it back", lastStatement);
                 try (Statement s = connection.createStatement()) {
                     s.execute("rollback tran");
@@ -349,7 +385,7 @@ public final class JdbcAseSession implements AseSession {
             cs.execute();
             drain(cs);
         } catch (SQLException e) {
-            throw new AsePortException("cobis..sp_cerror failed", e);
+            throw failure("cobis..sp_cerror", e);
         }
     }
 
@@ -386,6 +422,54 @@ public final class JdbcAseSession implements AseSession {
                 "bp_orden_his", ps -> ps.setObject(1, ordenBanco, Types.INTEGER));
     }
 
+    // ---- order header (B12) ----------------------------------------------------------------------
+
+    /**
+     * The legacy names {@code bp_total_orden} unqualified: it resolves in the procedure's home database,
+     * which brief section 7 A8 says is {@code cobis} ({@code debcred.ase.cobis-database}, the same home
+     * database the unqualified procedures use). {@code cobis..sp_cerror} and {@code db_sat_his..} are
+     * qualified literally in the legacy and stay literal here (review Phase 3 M1).
+     */
+    @Override
+    public int markLiveInTransition(Integer ordenBanco, List<String> paymentForms, String servicio, int codError) {
+        return markInTransition(cobis + "..bp_total_orden", ordenBanco, paymentForms, servicio, codError);
+    }
+
+    @Override
+    public int markHistoryInTransition(Integer ordenBanco, List<String> paymentForms, String servicio, int codError) {
+        return markInTransition("db_sat_his..bp_total_orden_his", ordenBanco, paymentForms, servicio, codError);
+    }
+
+    /**
+     * 1886-1898 / 1908-1920. {@code table} is only ever a literal or the validated home-database identifier
+     * plus a literal. The IN list is bound, one placeholder per form. A single NULL form matches nothing
+     * <b>only if</b> {@code te_frm_pagcob} is NOT NULL or the session runs with {@code ansinull on}; with
+     * {@code ansinull off}, Sybase reads {@code col in (NULL)} as {@code col is null}. To confirm on the
+     * bank's ASE together with the DDL (review Phase 3 M3).
+     */
+    private int markInTransition(String table, Integer ordenBanco, List<String> forms, String servicio, int codError) {
+        if (forms.isEmpty()) {
+            return 0;                          // an empty IN list matches nothing (review Phase 3 M2)
+        }
+        lastStatement = "update " + table;
+        String in = "?, ".repeat(forms.size() - 1) + "?";
+        String sql = "update " + table + " set te_estado_proceso = 'T', te_codigo_error = ?"
+                + " where te_orden_banco = ? and te_frm_pagcob in (" + in + ") and te_servicio = ?"
+                + " and isnull(te_estado_proceso, 'I') = 'I'";
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            int i = 1;
+            ps.setInt(i++, codError);
+            ps.setObject(i++, ordenBanco, Types.INTEGER);
+            for (String form : forms) {
+                ps.setString(i++, form);
+            }
+            ps.setString(i, servicio);
+            return ps.executeUpdate();
+        } catch (SQLException e) {
+            throw failure("update " + table, e);
+        }
+    }
+
     // ---- plumbing --------------------------------------------------------------------------------
 
     private interface Binder<S extends Statement> {
@@ -411,7 +495,7 @@ public final class JdbcAseSession implements AseSession {
             drain(cs);
             return read.read(cs);
         } catch (SQLException e) {
-            throw new AsePortException(procedure + " failed", e);
+            throw failure(procedure, e);
         }
     }
 
@@ -431,7 +515,7 @@ public final class JdbcAseSession implements AseSession {
                 return rs.next() ? Optional.ofNullable(rs.getString(1)) : Optional.empty();
             }
         } catch (SQLException e) {
-            throw new AsePortException("query on " + what + " failed", e);
+            throw failure("query on " + what, e);
         }
     }
 
@@ -440,7 +524,7 @@ public final class JdbcAseSession implements AseSession {
         try (Statement s = connection.createStatement()) {
             s.execute(statement);
         } catch (SQLException e) {
-            throw new AsePortException(statement + " failed", e);
+            throw failure(statement, e);
         }
     }
 

@@ -1,0 +1,703 @@
+{
+  "_comment": "Phase 3 golden cases for sp_debcred_empresa: the order-header update B12 (lines 1876-2090), RULE-014/018/010. Expected values are the LEGACY behavior read from legacy/debcred/sp_debcred_empresa.sp (spec-based; no ASE available, brief section 7 A4). Same schema as phase2-cases.json plus the optional inputs canal, opcion, frmPagcob, frmPagcobDeb, tipoAfec, liveOrderService (or_servicio of bp_orden for an SPI return), headerRows (presence = the header tables are scripted; [] = both empty; each {table LIVE|HISTORY, order, form, service, state}, state null = NULL), headerThrows (tables whose UPDATE raises @@error), and the optional expected headerUpdates (UPDATE statements issued) and headerStates (committed te_estado_proceso per row). Fake data only.",
+  "cases": [
+    {
+      "name": "DIR option 02: CUE (I) and EFE (NULL) move to T, CHE stays I",
+      "rules": [
+        "RULE-014",
+        "RULE-018"
+      ],
+      "accountType": 3,
+      "service": "ROLPAGO",
+      "aplcobis": "N",
+      "company": 500,
+      "accountingReturnCode": 0,
+      "debitReturnCode": 0,
+      "movementReturnCode": 0,
+      "canal": "DIR",
+      "opcion": "02",
+      "headerRows": [
+        {
+          "table": "LIVE",
+          "order": 123456,
+          "form": "CUE",
+          "service": "ROLPAGO",
+          "state": "I"
+        },
+        {
+          "table": "LIVE",
+          "order": 123456,
+          "form": "EFE",
+          "service": "ROLPAGO",
+          "state": null
+        },
+        {
+          "table": "LIVE",
+          "order": 123456,
+          "form": "CHE",
+          "service": "ROLPAGO",
+          "state": "I"
+        }
+      ],
+      "expected": {
+        "returnCode": 0,
+        "oError": 0,
+        "exit": "OK",
+        "begins": 1,
+        "commits": 1,
+        "rollbacks": 0,
+        "movementStatus": "P",
+        "committed": [
+          "sp_ndc_ahcc",
+          "sp_grb_mov_y_frmpgo"
+        ],
+        "cerror": false,
+        "headerUpdates": 1,
+        "headerStates": [
+          {
+            "table": "LIVE",
+            "order": 123456,
+            "form": "CUE",
+            "service": "ROLPAGO",
+            "state": "T"
+          },
+          {
+            "table": "LIVE",
+            "order": 123456,
+            "form": "EFE",
+            "service": "ROLPAGO",
+            "state": "T"
+          },
+          {
+            "table": "LIVE",
+            "order": 123456,
+            "form": "CHE",
+            "service": "ROLPAGO",
+            "state": "I"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SFR option 03: CHE moves, CHL stays I",
+      "rules": [
+        "RULE-014"
+      ],
+      "accountType": 3,
+      "service": "ROLPAGO",
+      "aplcobis": "N",
+      "company": 500,
+      "accountingReturnCode": 0,
+      "debitReturnCode": 0,
+      "movementReturnCode": 0,
+      "canal": "SFR",
+      "opcion": "03",
+      "headerRows": [
+        {
+          "table": "LIVE",
+          "order": 123456,
+          "form": "CHE",
+          "service": "ROLPAGO",
+          "state": "I"
+        },
+        {
+          "table": "LIVE",
+          "order": 123456,
+          "form": "CHL",
+          "service": "ROLPAGO",
+          "state": "I"
+        }
+      ],
+      "expected": {
+        "returnCode": 0,
+        "oError": 0,
+        "exit": "OK",
+        "begins": 1,
+        "commits": 1,
+        "rollbacks": 0,
+        "movementStatus": "P",
+        "committed": [
+          "sp_ndc_ahcc",
+          "sp_grb_mov_y_frmpgo"
+        ],
+        "cerror": false,
+        "headerUpdates": 1,
+        "headerStates": [
+          {
+            "table": "LIVE",
+            "order": 123456,
+            "form": "CHE",
+            "service": "ROLPAGO",
+            "state": "T"
+          },
+          {
+            "table": "LIVE",
+            "order": 123456,
+            "form": "CHL",
+            "service": "ROLPAGO",
+            "state": "I"
+          }
+        ]
+      }
+    },
+    {
+      "name": "VEN option 01 with debit form EFE: only EFE moves",
+      "rules": [
+        "RULE-014",
+        "RULE-025"
+      ],
+      "accountType": 3,
+      "service": "ROLPAGO",
+      "aplcobis": "N",
+      "company": 500,
+      "accountingReturnCode": 0,
+      "debitReturnCode": 0,
+      "movementReturnCode": 0,
+      "canal": "VEN",
+      "opcion": "01",
+      "frmPagcob": "CUE",
+      "frmPagcobDeb": "EFE",
+      "headerRows": [
+        {
+          "table": "LIVE",
+          "order": 123456,
+          "form": "CUE",
+          "service": "ROLPAGO",
+          "state": "I"
+        },
+        {
+          "table": "LIVE",
+          "order": 123456,
+          "form": "EFE",
+          "service": "ROLPAGO",
+          "state": "I"
+        }
+      ],
+      "expected": {
+        "returnCode": 0,
+        "oError": 0,
+        "exit": "OK",
+        "begins": 1,
+        "commits": 1,
+        "rollbacks": 0,
+        "movementStatus": "P",
+        "committed": [
+          "sp_ndc_ahcc",
+          "sp_grb_mov_y_frmpgo"
+        ],
+        "cerror": false,
+        "headerUpdates": 1,
+        "headerStates": [
+          {
+            "table": "LIVE",
+            "order": 123456,
+            "form": "CUE",
+            "service": "ROLPAGO",
+            "state": "I"
+          },
+          {
+            "table": "LIVE",
+            "order": 123456,
+            "form": "EFE",
+            "service": "ROLPAGO",
+            "state": "T"
+          }
+        ]
+      }
+    },
+    {
+      "name": "other channel WEB: TPD moves, CUE stays I",
+      "rules": [
+        "RULE-014"
+      ],
+      "accountType": 3,
+      "service": "ROLPAGO",
+      "aplcobis": "N",
+      "company": 500,
+      "accountingReturnCode": 0,
+      "debitReturnCode": 0,
+      "movementReturnCode": 0,
+      "canal": "WEB",
+      "opcion": "02",
+      "headerRows": [
+        {
+          "table": "LIVE",
+          "order": 123456,
+          "form": "TPD",
+          "service": "ROLPAGO",
+          "state": "I"
+        },
+        {
+          "table": "LIVE",
+          "order": 123456,
+          "form": "CUE",
+          "service": "ROLPAGO",
+          "state": "I"
+        }
+      ],
+      "expected": {
+        "returnCode": 0,
+        "oError": 0,
+        "exit": "OK",
+        "begins": 1,
+        "commits": 1,
+        "rollbacks": 0,
+        "movementStatus": "P",
+        "committed": [
+          "sp_ndc_ahcc",
+          "sp_grb_mov_y_frmpgo"
+        ],
+        "cerror": false,
+        "headerUpdates": 1,
+        "headerStates": [
+          {
+            "table": "LIVE",
+            "order": 123456,
+            "form": "TPD",
+            "service": "ROLPAGO",
+            "state": "T"
+          },
+          {
+            "table": "LIVE",
+            "order": 123456,
+            "form": "CUE",
+            "service": "ROLPAGO",
+            "state": "I"
+          }
+        ]
+      }
+    },
+    {
+      "name": "archived order: live 0 rows, history NULL row moves to T, no 122004",
+      "rules": [
+        "RULE-018",
+        "RULE-010"
+      ],
+      "accountType": 3,
+      "service": "ROLPAGO",
+      "aplcobis": "N",
+      "company": 500,
+      "accountingReturnCode": 0,
+      "debitReturnCode": 0,
+      "movementReturnCode": 0,
+      "opcion": "02",
+      "headerRows": [
+        {
+          "table": "HISTORY",
+          "order": 123456,
+          "form": "CUE",
+          "service": "ROLPAGO",
+          "state": null
+        }
+      ],
+      "expected": {
+        "returnCode": 0,
+        "oError": 0,
+        "exit": "OK",
+        "begins": 1,
+        "commits": 1,
+        "rollbacks": 0,
+        "movementStatus": "P",
+        "committed": [
+          "sp_ndc_ahcc",
+          "sp_grb_mov_y_frmpgo"
+        ],
+        "cerror": false,
+        "headerUpdates": 2,
+        "headerStates": [
+          {
+            "table": "HISTORY",
+            "order": 123456,
+            "form": "CUE",
+            "service": "ROLPAGO",
+            "state": "T"
+          }
+        ]
+      }
+    },
+    {
+      "name": "no header row anywhere, not COBIS: 122004 in o_error, full rollback",
+      "rules": [
+        "RULE-010",
+        "RULE-028"
+      ],
+      "accountType": 3,
+      "service": "ROLPAGO",
+      "aplcobis": "N",
+      "company": 500,
+      "accountingReturnCode": 0,
+      "debitReturnCode": 0,
+      "movementReturnCode": 0,
+      "opcion": "02",
+      "headerRows": [],
+      "expected": {
+        "returnCode": 0,
+        "oError": 122004,
+        "exit": "C",
+        "begins": 1,
+        "commits": 0,
+        "rollbacks": 1,
+        "movementStatus": "P",
+        "committed": [],
+        "cerror": false,
+        "headerUpdates": 2,
+        "headerStates": []
+      }
+    },
+    {
+      "name": "no header row anywhere, COBIS: 122004 returned, sp_cerror, full rollback",
+      "rules": [
+        "RULE-010",
+        "RULE-028"
+      ],
+      "accountType": 3,
+      "service": "ROLPAGO",
+      "aplcobis": "S",
+      "company": 500,
+      "accountingReturnCode": 0,
+      "debitReturnCode": 0,
+      "movementReturnCode": 0,
+      "opcion": "02",
+      "headerRows": [],
+      "expected": {
+        "returnCode": 122004,
+        "oError": 0,
+        "exit": "C",
+        "begins": 1,
+        "commits": 0,
+        "rollbacks": 1,
+        "movementStatus": "P",
+        "committed": [],
+        "cerror": true,
+        "headerUpdates": 2,
+        "headerStates": []
+      }
+    },
+    {
+      "name": "header already T: untouched, 122004, rolled back",
+      "rules": [
+        "RULE-010",
+        "RULE-018"
+      ],
+      "accountType": 3,
+      "service": "ROLPAGO",
+      "aplcobis": "N",
+      "company": 500,
+      "accountingReturnCode": 0,
+      "debitReturnCode": 0,
+      "movementReturnCode": 0,
+      "opcion": "02",
+      "headerRows": [
+        {
+          "table": "LIVE",
+          "order": 123456,
+          "form": "CUE",
+          "service": "ROLPAGO",
+          "state": "T"
+        }
+      ],
+      "expected": {
+        "returnCode": 0,
+        "oError": 122004,
+        "exit": "C",
+        "begins": 1,
+        "commits": 0,
+        "rollbacks": 1,
+        "movementStatus": "P",
+        "committed": [],
+        "cerror": false,
+        "headerUpdates": 2,
+        "headerStates": [
+          {
+            "table": "LIVE",
+            "order": 123456,
+            "form": "CUE",
+            "service": "ROLPAGO",
+            "state": "T"
+          }
+        ]
+      }
+    },
+    {
+      "name": "exempt TRANSQUICK with no header row commits",
+      "rules": [
+        "RULE-010"
+      ],
+      "accountType": 3,
+      "service": "TRANSQUICK",
+      "aplcobis": "N",
+      "company": 500,
+      "accountingReturnCode": 0,
+      "debitReturnCode": 0,
+      "movementReturnCode": 0,
+      "opcion": "02",
+      "headerRows": [],
+      "expected": {
+        "returnCode": 0,
+        "oError": 0,
+        "exit": "OK",
+        "begins": 1,
+        "commits": 1,
+        "rollbacks": 0,
+        "movementStatus": "P",
+        "committed": [
+          "sp_ndc_ahcc",
+          "sp_grb_mov_y_frmpgo"
+        ],
+        "cerror": false,
+        "headerUpdates": 2,
+        "headerStates": []
+      }
+    },
+    {
+      "name": "exempt PAGOPRV with no header row commits",
+      "rules": [
+        "RULE-010"
+      ],
+      "accountType": 3,
+      "service": "PAGOPRV",
+      "aplcobis": "N",
+      "company": 500,
+      "accountingReturnCode": 0,
+      "debitReturnCode": 0,
+      "movementReturnCode": 0,
+      "opcion": "02",
+      "headerRows": [],
+      "expected": {
+        "returnCode": 0,
+        "oError": 0,
+        "exit": "OK",
+        "begins": 1,
+        "commits": 1,
+        "rollbacks": 0,
+        "movementStatus": "P",
+        "committed": [
+          "sp_ndc_ahcc",
+          "sp_grb_mov_y_frmpgo"
+        ],
+        "cerror": false,
+        "headerUpdates": 2,
+        "headerStates": []
+      }
+    },
+    {
+      "name": "SPI return (act_totord N) under original service TRANSCLI, no header row: commits",
+      "rules": [
+        "RULE-010",
+        "RULE-023"
+      ],
+      "accountType": 3,
+      "service": "SPI",
+      "aplcobis": "N",
+      "company": 500,
+      "accountingReturnCode": 0,
+      "debitReturnCode": 0,
+      "movementReturnCode": 0,
+      "tipoAfec": "12",
+      "liveOrderService": "TRANSCLI",
+      "headerRows": [],
+      "expected": {
+        "returnCode": 0,
+        "oError": 0,
+        "exit": "OK",
+        "begins": 1,
+        "commits": 1,
+        "rollbacks": 0,
+        "movementStatus": "P",
+        "committed": [
+          "sp_ndc_ahcc",
+          "sp_grb_mov_y_frmpgo"
+        ],
+        "cerror": false,
+        "headerUpdates": 2,
+        "headerStates": []
+      }
+    },
+    {
+      "name": "DIR option 04: no UPDATE, stale @wRowdbBiz NULL, commits with the header untouched",
+      "rules": [
+        "RULE-014",
+        "RULE-010"
+      ],
+      "accountType": 3,
+      "service": "ROLPAGO",
+      "aplcobis": "N",
+      "company": 500,
+      "accountingReturnCode": 0,
+      "debitReturnCode": 0,
+      "movementReturnCode": 0,
+      "canal": "DIR",
+      "opcion": "04",
+      "headerRows": [
+        {
+          "table": "LIVE",
+          "order": 123456,
+          "form": "CUE",
+          "service": "ROLPAGO",
+          "state": "I"
+        }
+      ],
+      "expected": {
+        "returnCode": 0,
+        "oError": 0,
+        "exit": "OK",
+        "begins": 1,
+        "commits": 1,
+        "rollbacks": 0,
+        "movementStatus": "P",
+        "committed": [
+          "sp_ndc_ahcc",
+          "sp_grb_mov_y_frmpgo"
+        ],
+        "cerror": false,
+        "headerUpdates": 0,
+        "headerStates": [
+          {
+            "table": "LIVE",
+            "order": 123456,
+            "form": "CUE",
+            "service": "ROLPAGO",
+            "state": "I"
+          }
+        ]
+      }
+    },
+    {
+      "name": "live UPDATE raises @@error: counted as 0 rows, history row moves, commits (parity)",
+      "rules": [
+        "RULE-010",
+        "RULE-018"
+      ],
+      "accountType": 3,
+      "service": "ROLPAGO",
+      "aplcobis": "N",
+      "company": 500,
+      "accountingReturnCode": 0,
+      "debitReturnCode": 0,
+      "movementReturnCode": 0,
+      "opcion": "02",
+      "headerThrows": [
+        "LIVE"
+      ],
+      "headerRows": [
+        {
+          "table": "HISTORY",
+          "order": 123456,
+          "form": "CUE",
+          "service": "ROLPAGO",
+          "state": "I"
+        }
+      ],
+      "expected": {
+        "returnCode": 0,
+        "oError": 0,
+        "exit": "OK",
+        "begins": 1,
+        "commits": 1,
+        "rollbacks": 0,
+        "movementStatus": "P",
+        "committed": [
+          "sp_ndc_ahcc",
+          "sp_grb_mov_y_frmpgo"
+        ],
+        "cerror": false,
+        "headerUpdates": 2,
+        "headerStates": [
+          {
+            "table": "HISTORY",
+            "order": 123456,
+            "form": "CUE",
+            "service": "ROLPAGO",
+            "state": "T"
+          }
+        ]
+      }
+    },
+    {
+      "name": "history UPDATE raises @@error after live 0: 122004 (parity)",
+      "rules": [
+        "RULE-010"
+      ],
+      "accountType": 3,
+      "service": "ROLPAGO",
+      "aplcobis": "N",
+      "company": 500,
+      "accountingReturnCode": 0,
+      "debitReturnCode": 0,
+      "movementReturnCode": 0,
+      "opcion": "02",
+      "headerThrows": [
+        "HISTORY"
+      ],
+      "headerRows": [],
+      "expected": {
+        "returnCode": 0,
+        "oError": 122004,
+        "exit": "C",
+        "begins": 1,
+        "commits": 0,
+        "rollbacks": 1,
+        "movementStatus": "P",
+        "committed": [],
+        "cerror": false,
+        "headerUpdates": 2,
+        "headerStates": []
+      }
+    },
+    {
+      "name": "TRANSCLI with commission: header moves, the three writes committed (walkthrough 1)",
+      "rules": [
+        "RULE-014",
+        "RULE-013",
+        "RULE-009"
+      ],
+      "accountType": 3,
+      "service": "TRANSCLI",
+      "aplcobis": "N",
+      "company": 500,
+      "accountingReturnCode": 0,
+      "debitReturnCode": 0,
+      "movementReturnCode": 0,
+      "canal": "DIR",
+      "opcion": "02",
+      "comision": "0",
+      "valorComision": "1.50",
+      "commissionReturnCode": 0,
+      "commissionOError": 0,
+      "headerRows": [
+        {
+          "table": "LIVE",
+          "order": 123456,
+          "form": "CUE",
+          "service": "TRANSCLI",
+          "state": "I"
+        }
+      ],
+      "expected": {
+        "returnCode": 0,
+        "oError": 0,
+        "exit": "OK",
+        "begins": 1,
+        "commits": 1,
+        "rollbacks": 0,
+        "movementStatus": "P",
+        "committed": [
+          "sp_ndc_ahcc",
+          "sp_grb_mov_y_frmpgo",
+          "sp_grb_comision"
+        ],
+        "cerror": false,
+        "headerUpdates": 1,
+        "headerStates": [
+          {
+            "table": "LIVE",
+            "order": 123456,
+            "form": "CUE",
+            "service": "TRANSCLI",
+            "state": "T"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -8,7 +8,7 @@ Date: 2026-09-27. Legacy: `legacy/debcred/sp_debcred_empresa.sp` (Sybase ASE / C
 
 Blocks B0-B6, B8, B9, B14 and B15 of the map (`analysis/debcred/topology.json`): the signature, commission normalization, concept and accounting configuration, `begin tran` + savepoint, the debit by account type (3/4 via `sp_ndc_ahcc`, 12 via `sp_vi_ndc_automatica`, 9 via `sp_graba_tran_servicio`), the movement record, and the three exits. First slice, as the brief names it: account type 3, happy path and debit failure (exit A).
 
-Out of scope in Phase 1, present as steps that later phases fill in: notifications B7 (Phase 4, stub "not configured"), commissions B10-B11 (**done in Phase 2**, see below), order-header update B12 (Phase 3, stub returns 0).
+Out of scope in Phase 1, present as steps that later phases fill in: notifications B7 (Phase 4, stub "not configured"), commissions B10-B11 (**done in Phase 2**), order-header update B12 (**done in Phase 3**), see below.
 
 ## Mapping (legacy lines -> target)
 
@@ -99,7 +99,7 @@ Not applied, listed for later:
 ## Follow-ups for the next phases
 
 1. ~~Phase 2 (commissions, B10-B11)~~: done, see "Phase 2" below.
-2. **Phase 3 (order header, B12):** `OrderHeaderStep` over `bp_total_orden` with the history fallback; note `@wRowdbBiz` is stale when `@i_opcion` is outside `01-03` (RULE-014 quirk, preserved).
+2. ~~Phase 3 (order header, B12)~~: done, see "Phase 3" below.
 3. **Phase 4 (notifications, B7):** replace the stub; `NotificationOutcome.configured = true` must overwrite the debit code (1248) and, for TRANSCLI/TARJCRED/COMEXT, the debit value (884-886).
 4. **Before any real ASE run:** confirm D1-7 (transaction mode), M2 (parameter order), and whether the COBIS callers open their own transaction (brief §7 A1, unanswered).
 5. `KNOWN_DIFFERENCES.md` (Phase 5): D1-2 and D1-3.
@@ -136,6 +136,34 @@ Brief Phase 2, entry criteria met (Phase 1 exit criteria and section 8 re-signed
 | M3, L1, L2 | 11-argument builder; wrong line numbers; two idioms for `> 0` | `separateCommission` / `swiftCommission` factories; Javadoc cites 1606 and 1824; `isPositive` everywhere |
 | L3 | `Continue(frmPagcob)` payload unused | Kept: it is part of the contract the tests pin; B12 reads `@i_frm_pagcob_deb`, so Phase 3 may drop it with the contract |
 | L4 | `Posting.Posted` trailing nulls | Deferred to Phase 4, when the record changes again |
+
+## Phase 3: order-header update (B12, legacy lines 1862-2090), 2026-09-27
+
+Brief Phase 3, entry criteria met (Phase 2 exit criteria; section 7 A5 assumed columns). Plan approved at the gate, including one parity decision: **a failed header UPDATE (statement-level `@@error`) counts as 0 rows and the flow continues**, because the legacy never checks `@@error` there.
+
+| Behavior | Legacy `sp_debcred_empresa.sp` | Target | Rules |
+|---|---|---|---|
+| Direct channel DIR/SFR/FR2/BTH/VEN (trailing blanks ignored) | 1876-1880 | `OrderHeaderTransition.paymentForms` | RULE-014 |
+| Option 01 -> `isnull(@i_frm_pagcob_deb, @i_frm_pagcob)`; 02 -> CUE/EFE/CHL; 03 -> CUE/EFE/CHE; other -> no UPDATE | 1884-2024 | `paymentForms` | RULE-014 |
+| Other channels -> COB/TRC/CTB/CPD/TPD | 2028-2044 | `paymentForms` | RULE-014 |
+| `I` or NULL -> `T`, `te_codigo_error`, live table then SAT history when 0 rows | 1886-2068 | `OrderHeaderRepository`, `JdbcAseSession.markInTransition` | RULE-014 (P0), RULE-018 |
+| 122004 when nothing moved, service not exempt, `@w_act_totord = 'S'` -> `lbl_error` | 2076-2090 | `OrderHeaderTransition.update`, service `errorExit` | RULE-010 |
+| Stale `@wRowdbBiz` for an option outside 01-03 (NULL today, never 122004) | 140, 2076 | `OrderHeaderContext.priorRowCount` | RULE-014 quirk, preserved |
+
+**Not migrated:** the commented ROLPAGO `bp_orden` update (2094-2124, RULE-020): a ROLPAGO happy path issues no other write (pinned).
+
+**Proof:** **286 tests, 0 failures, 0 skipped** (`mvn -o test` from clean): 184 from Phases 1-2 (no assertion changed), 95 Phase 3 characterization tests (a jqwik property of 1000 tries over channel x option x payment form x live/history rows, walkthrough 1 end to end), 15 more golden cases (`equivalence cases executed: 41 of 41`) and 7 adapter/transaction tests. **Canaries** (XML under `analysis/debcred/equivalence/canary/sp_debcred_empresa/`): option 02 matching CHE instead of CHL -> **14 failed**; no history fallback -> **33 failed**. Equivalence remains spec-based (no ASE).
+
+**Architecture review (Phase 3):**
+
+| # | Finding | Change |
+|---|---|---|
+| H1 | Swallowing every `AsePortException` as "0 rows" would also swallow a **lost transaction** (ASE deadlock victim 1205, lost connection), and the flow would reach `commit` and report success for a debit that was rolled back. The legacy's batch aborts there. | `AseTransactionAbortedException`: `JdbcAseSession` classifies 1205 and SQLState 08xxx inside a transaction; `OrderHeaderTransition` rethrows it; `commit()` refuses when `@@trancount = 0`; `rollback()` does not re-issue against an ended transaction. Tests in `JdbcAseSessionTest` and `AbortedTransactionTest`. The statement-level "0 rows" parity is unchanged. |
+| H2 | `priorRowCount` is NULL at the call site; Phase 4 could wire the wrong row count | TODO at the call site naming the exact legacy assignments (824/840, 890/912, 1358); the step's handling of 0 and >0 is already pinned by tests. Rename to `wRowdbBizBeforeB12` deferred to Phase 4 with the contract. |
+| M1 | Home database of the unqualified table | Documented: `debcred.ase.cobis-database` is the procedure's home database (section 7 A8), used for every unqualified name; `cobis..sp_cerror` and `db_sat_his..` stay literal as in the legacy |
+| M2 | Empty IN list produced invalid SQL | Returns 0 without SQL; test |
+| M3 | `in (NULL)` depends on `ansinull` and column nullability | Documented on the adapter; **to confirm on the bank's ASE together with the DDL** |
+| L1-L4 | Enum for the table; SQLState in logs; `Integer codErrord`; `null` as a signal | SQLState/code now logged; the rest kept (the table is always a literal or a validated identifier; `codErrord` is 0 on this path; the contract pins the shapes) |
 
 ## Side by side: exit A (debit failed), legacy 1332-1342 and 1480-1492 vs the service
 

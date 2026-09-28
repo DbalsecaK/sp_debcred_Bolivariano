@@ -1,4 +1,4 @@
-# Production contract for `com.nexti.debcred` (Phase 1 + Phase 2)
+# Production contract for `com.nexti.debcred` (Phase 1 + Phase 2 + Phase 3)
 
 The characterization tests under this directory compile against exactly the types below. The
 implementation is written to match this file; if something here must change, change the tests in
@@ -413,3 +413,84 @@ call, `secondCommission(returnCode, oError)` the SWIFT call (recognised by `iTip
 write `"sp_grb_comision"` (the procedure records its own movement) so the exit-B rollback is seen
 to discard it. `service()` wires `new CommissionDebits(session, session, session)` behind a logging
 `CommissionStep` that still records `"commissionStep"` and the `CommissionContext`.
+
+## Phase 3: order-header update (B12, lines 1862-2090)
+
+The stubbed `OrderHeaderStep` of section 3 becomes a real step. Everything else in this file stays.
+Legacy oracle: lines 1862-2090 (the commented ROLPAGO block 2094-2124 is **not** migrated, RULE-020).
+Business logic preserved as-is. Rules: RULE-014 (P0), RULE-018, RULE-010.
+
+### New port, changed records
+
+```java
+public interface OrderHeaderRepository {            // bp_total_orden (1886-1898), db_sat_his..bp_total_orden_his (1908-1920)
+    int markLiveInTransition(Integer ordenBanco, List<String> paymentForms, String servicio, int codError);
+    int markHistoryInTransition(Integer ordenBanco, List<String> paymentForms, String servicio, int codError);
+}
+// each: update ... set te_estado_proceso = 'T', te_codigo_error = codError
+//       where te_orden_banco = ordenBanco and te_frm_pagcob in (paymentForms) and te_servicio = servicio
+//         and isnull(te_estado_proceso, 'I') = 'I'
+// returns @@rowcount; an ASE failure is AsePortException (= @@error <> 0).
+
+public record OrderHeaderContext(DebitRequest request, String servicio, String frmPagcobDeb, String actTotord,
+        Integer codErrord, Integer priorRowCount) {}
+
+public interface OrderHeaderStep { int update(OrderHeaderContext ctx); }   // 0 = continue, else numError for lbl_error
+public final class OrderHeaderTransition implements OrderHeaderStep {
+    public OrderHeaderTransition(OrderHeaderRepository headers) { ... }
+}
+```
+
+`AseSession` also extends `OrderHeaderRepository`. `DebitFlowConfiguration` wires
+`new OrderHeaderTransition(ase)`.
+
+`OrderHeaderContext` carries the working values: `servicio` = `@i_servicio` after the SPI-return
+lookup (section 4 step 14; NULL when that order was found nowhere), `frmPagcobDeb` =
+`isnull(@i_frm_pagcob_deb, @i_frm_pagcob)` (line 262; NOT the TRANSQUICK-swapped commission form),
+`actTotord` ('N' for an SPI return), `codErrord` (`@w_cod_errord`, always 0 on this path) and
+`priorRowCount` = the value `@wRowdbBiz` holds when B12 starts. Today the service passes `null`
+(declared NULL at line 140; the B7 reads at 824/840 and 890/912 are Phase 4 and stubbed; the
+SPI-return lookup at 1358 only sets it when `actTotord` is already 'N', where it cannot matter).
+Phase 4 will fill it.
+
+### Behavior pinned
+
+1. Channel test (1876-1880): `iCanal` equals `DIR`, `SFR`, `FR2`, `BTH` or `VEN` with Sybase `=`
+   (trailing blanks ignored, a leading blank does not match; a NULL channel cannot arrive: the
+   compact constructor made it `DIR`, RULE-037).
+2. Direct channel: `iOpcion` (`=`, trailing blanks ignored) `'01'` -> `paymentForms =
+   Collections.singletonList(frmPagcobDeb)` (may hold a single NULL, which matches nothing; the
+   UPDATEs still run); `'02'` -> `List.of("CUE","EFE","CHL")`; `'03'` -> `List.of("CUE","EFE","CHE")`;
+   anything else, NULL included -> **no UPDATE at all** and the row count stays `priorRowCount`.
+3. Any other channel -> `List.of("COB","TRC","CTB","CPD","TPD")` whatever the option.
+4. When an UPDATE runs: `rows = markLiveInTransition(iOrden, forms, servicio, codErrord)`; if
+   `rows <= 0`: `rows = markHistoryInTransition(same arguments)`. The history table is never touched
+   when the live update moved a row (RULE-018).
+5. **Approved parity decision (plan gate):** the legacy never checks `@@error` on these UPDATEs. An
+   `AsePortException` from either counts as 0 rows and the flow continues (live failure -> history is
+   tried; history failure -> 0).
+6. RULE-010 (2076-2090): if `rows` is non-null and `== 0`, and `servicio` is **not** one of
+   `TRANSWIFT, IMPADUAN, PAGIESS, TRANSQUICK, TRANSBIMO, PAGOPRV` (Sybase `not in`: trailing blanks
+   ignored, a leading blank is not in the list; a NULL `servicio` makes `not in` unknown -> false),
+   and `actTotord` equals `'S'` -> return `122004`. Otherwise return 0. A `null` row count (stale NULL
+   `@wRowdbBiz`) never raises 122004.
+7. The service: non-zero from `update` -> `errorExit(request, n, true)` (exit C of section 4 step 18:
+   full rollback; aplcobis 'S' -> `sp_cerror(iSpName, 122004)` and `DebitResult(122004, 0, null)`; else
+   `DebitResult(0, 122004, null)`); zero -> `commit()`, `DebitResult(0, 0, null)`.
+8. Exit A and exit B never reach the step (the order stays 'I': walkthrough 4 is re-runnable). No
+   other write happens in B12 (the ROLPAGO `bp_orden` update is commented out in the legacy).
+
+### Test doubles
+
+`FakeAseSession` implements `OrderHeaderRepository` over two in-memory tables (`HeaderTable.LIVE`,
+`HeaderTable.HISTORY`) of `HeaderRow(order, form, service, state, codError)`, scripted with
+`headerRow(...)`, `historyHeaderRow(...)`, `noHeaderRows()` and `headerUpdateThrows(table)`. The WHERE
+clause uses Sybase semantics. Row changes follow the transaction model (snapshot at `begin` and each
+`savepoint`, restored by `rollback`/`rollbackToSavepoint`, kept by `commit`), so a 122004 rollback
+restores every row. Each UPDATE is logged in `headerUpdates()` (`HeaderUpdate(table, ordenBanco,
+paymentForms, servicio, codError, rowCount)`, `rowCount = -1` when it raised). The header UPDATEs are
+**not** added to `calls()` or `committedWrites()`, which keep their Phase 1/2 meaning (procedure calls,
+procedure writes). A session whose header tables were never scripted (the Phase 1/2 tests) answers 1
+row to the live update, i.e. "the order header exists in state I". `service()` wires the real
+`OrderHeaderTransition(this)` behind a wrapper that still logs `"orderHeaderStep"` and records the
+context.
