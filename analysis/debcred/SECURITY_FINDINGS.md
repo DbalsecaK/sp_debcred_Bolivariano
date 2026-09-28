@@ -88,13 +88,11 @@ The legacy has no dependency manifest (one T-SQL file): no CVE table applies.
 | ID | Fix | Patch |
 |---|---|---|
 | Legacy | No Critical or High finding survived refutation: **no legacy patch was drafted** (`security_remediation.patch` not written). The Medium/Low legacy findings are A9 parity risks. | - |
-| JSEC-001 | Authenticate the endpoint (mTLS or OAuth2 resource server with client credentials), allow only the named COBIS caller identities, bind to an internal interface or a gateway, log the principal next to `sUser`. **Needs a decision: which mechanism.** | not drafted: service code, see below |
+| JSEC-001 | **Fixed 2026-09-28 (section 7 A21: mTLS).** `api/SecurityConfiguration`: HTTPS with `client-auth: need`; only a client certificate whose CN is in `DEBCRED_ALLOWED_CALLERS` is served, anything else 403; empty list refuses everyone; no key store, no start. `local-pg` stays plain HTTP on 127.0.0.1. Tests `MutualTlsWebTest` (5); `Canary: authorization changed to permitAll -> 4 tests failed`. | service code (no legacy patch) |
 | JSEC-002 | TLS to ASE (confirm jTDS vs SAP jConnect 16 on the bank's ASE) and HTTPS or TLS at a gateway | not drafted: depends on the bank's ASE and the driver |
-| JSEC-003 | Reject amounts outside the ASE `money` domain (abs <= 922,337,203,685,477.5807, scale <= 4) with 400 in `DebitRequest`; drop the value from the exception message | not drafted: service code, see below |
+| JSEC-003 | **Fixed 2026-09-28 (section 7 A21).** `DebitRequest` refuses any of the 11 money inputs outside +/-922,337,203,685,477.5807 or with more than 38 decimals (HTTP 400), checking scale and precision before any arithmetic; `CommissionBreakdown` no longer echoes the value. Tests `Jsec003MoneyDomainTest` (9) and a web test; `Canary: decimals limit removed -> 1 test failed`. Checked over HTTP on local-pg: `1E999999999` -> 400. | service code (no legacy patch) |
 
-The remediation of the Java findings is a code change in `modernized/`, which this command does not write
-(it drafts patches only against `legacy/debcred`). It goes through `/code-modernization:modernize-transform debcred
-sp_debcred_empresa` once the person decides JSEC-001's mechanism.
+JSEC-001 and JSEC-003 were fixed in the service code after the person's decision (section 7 A21), with tests and canaries: 514 tests, 0 failures. JSEC-002 (TLS to ASE) depends on the bank's ASE and the driver (section 7 A20).
 
 ## Patch Review
 
@@ -102,4 +100,4 @@ No patch was drafted, so none was reviewed.
 
 ## Phase 5 exit criterion
 
-**Not met:** JSEC-001 (Critical), JSEC-002 and JSEC-003 (High) are open service defects, not parity risks.
+**Not met yet:** JSEC-001 (Critical) and JSEC-003 (High) are fixed; **JSEC-002 (High, TLS to ASE) is still open**, pending the bank's test ASE (section 7 A20).

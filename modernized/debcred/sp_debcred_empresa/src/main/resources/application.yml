@@ -20,6 +20,17 @@ server:
   error:
     include-stacktrace: never
     include-message: never
+  # mTLS (brief section 7 A21, harden JSEC-001): HTTPS only, and every caller must present a client
+  # certificate signed by the trust store's CA. Without a key store the service does not start (fail closed).
+  ssl:
+    enabled: true
+    client-auth: need
+    key-store: ${DEBCRED_TLS_KEYSTORE:}
+    key-store-password: ${DEBCRED_TLS_KEYSTORE_PASSWORD:}
+    key-store-type: ${DEBCRED_TLS_KEYSTORE_TYPE:PKCS12}
+    trust-store: ${DEBCRED_TLS_TRUSTSTORE:}
+    trust-store-password: ${DEBCRED_TLS_TRUSTSTORE_PASSWORD:}
+    trust-store-type: ${DEBCRED_TLS_TRUSTSTORE_TYPE:PKCS12}
 
 # Sybase ASE with the COBIS procedures and tables. Values come from the environment; nothing here
 # is a credential. cobis-database: the home of the legacy's unqualified names (brief 7-A8).
@@ -27,6 +38,9 @@ server:
 # `begin tran`, so do not let jTDS create temporary procedures, and bind text as varchar like the legacy:
 #   jdbc:jtds:sybase://<host>:<port>/<db>;prepareSQL=0;sendStringParametersAsUnicode=false
 debcred:
+  security:
+    # CN of each COBIS caller's client certificate, comma separated, matched exactly. Empty: nobody.
+    allowed-callers: ${DEBCRED_ALLOWED_CALLERS:}
   ase:
     url: ${DEBCRED_ASE_URL:}
     username: ${DEBCRED_ASE_USERNAME:}

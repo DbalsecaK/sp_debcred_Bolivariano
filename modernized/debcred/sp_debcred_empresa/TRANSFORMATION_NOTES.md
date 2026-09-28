@@ -217,6 +217,13 @@ Brief Phase 4, entry criteria met (Phase 3 exit criteria; section 7 A5 assumed c
 2. ~~Decisions M1, M2~~: decided in brief section 7 A19 (2026-09-28). The ASE confirmations are section 7 A20.
 3. **Phase 5 / `KNOWN_DIFFERENCES.md`:** the 882 result set (A11), `@o_reg_a_proc` NULL, D1-2 and D1-3.
 
+## Security fixes after harden (brief section 7 A21), 2026-09-28
+
+- **JSEC-001, mTLS.** `api/SecurityConfiguration`: every call needs a client certificate (`server.ssl.client-auth: need`) whose CN is listed in `DEBCRED_ALLOWED_CALLERS`; otherwise 403 and nothing runs; an empty list refuses everyone. Deploy with `DEBCRED_TLS_KEYSTORE` (+ `_PASSWORD`, `_TYPE`, default PKCS12) and `DEBCRED_TLS_TRUSTSTORE` (the CA that signs the callers' certificates); without a key store the service does not start. The `local-pg` profile keeps plain HTTP on 127.0.0.1.
+- **JSEC-003, money domain.** `DebitRequest` refuses any money input outside +/-922,337,203,685,477.5807 or with more than 38 decimals (HTTP 400) before any arithmetic. Deliberate deviation, approved in A21: the legacy's `money` parameters could not receive such values at all.
+- **Proof:** 514 tests, 0 failures (16 new). Canaries: authorization changed to `permitAll` -> 4 failed; decimals limit removed -> 1 failed. Local HTTP check: normal debit `{0, 0}`, `1E999999999` -> 400; server stopped.
+- **Open:** JSEC-002 (TLS to ASE; jTDS vs SAP jConnect 16) with section 7 A20.
+
 ## Side by side: notification channel, legacy 760-794 vs `CustomerNotifications.Channel.of`
 
 Generated from the sources (`diff -y --width=160`); the legacy range holds no credential.

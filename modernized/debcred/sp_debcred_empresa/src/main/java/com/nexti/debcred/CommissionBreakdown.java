@@ -54,7 +54,7 @@ record CommissionBreakdown(BigDecimal comision, BigDecimal valorComision, int ca
                 cantidad = whole.intValueExact();
             } catch (ArithmeticException overflow) {
                 // The legacy int assignment would raise an arithmetic overflow (@@error <> 0); it is not tolerated.
-                throw new AsePortException("commission count overflows int: " + whole, overflow);
+                throw new AsePortException("commission count overflows int", overflow);   // JSEC-003: no value echoed
             }
         }
         return new CommissionBreakdown(comision, valorComision, cantidad, valPorTran);                // 248

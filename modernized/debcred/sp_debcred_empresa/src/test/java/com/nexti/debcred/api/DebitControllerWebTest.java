@@ -1,6 +1,7 @@
 package com.nexti.debcred.api;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.x509;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
 import java.math.BigDecimal;
@@ -25,6 +26,7 @@ import com.nexti.debcred.NotificationOutcome;
 import com.nexti.debcred.OrderHeaderTransition;
 import com.nexti.debcred.ase.AseSessionFactory.SessionOpener;
 import com.nexti.debcred.ase.AseUnavailableException;
+import com.nexti.debcred.support.Certificates;
 import com.nexti.debcred.support.FakeAseSession;
 
 /**
@@ -32,8 +34,8 @@ import com.nexti.debcred.support.FakeAseSession;
  * scale, ISO date-time), business outcomes as HTTP 200 with return code and o_error (RULE-028),
  * unknown keys refused, infrastructure failures as problem details with a correlation id.
  */
-@WebMvcTest(DebitController.class)
-@Import(DebitControllerWebTest.Wiring.class)
+@WebMvcTest(controllers = DebitController.class, properties = "debcred.security.allowed-callers=cobis-fake-caller")
+@Import({DebitControllerWebTest.Wiring.class, SecurityConfiguration.class})
 class DebitControllerWebTest {
 
     /** One fake session per test, shared with the test through this holder. */
@@ -79,7 +81,8 @@ class DebitControllerWebTest {
             """;
 
     private MvcResult send(String json) throws Exception {
-        return mockMvc.perform(post("/debitos-empresa").contentType(MediaType.APPLICATION_JSON).content(json)).andReturn();
+        return mockMvc.perform(post("/debitos-empresa").with(x509(Certificates.caller("cobis-fake-caller")))   // A21 mTLS
+                .contentType(MediaType.APPLICATION_JSON).content(json)).andReturn();
     }
 
     @Test
@@ -119,6 +122,19 @@ class DebitControllerWebTest {
 
         assertThat(result.getResponse().getStatus()).isEqualTo(400);
         assertThat(SESSION.get().calls()).as("nothing ran").isEmpty();
+    }
+
+    @Test
+    void jsec003_anAmountOutsideTheMoneyDomainIsRefusedWith400Quickly() throws Exception {
+        SESSION.set(new FakeAseSession());
+        OPEN_FAILURE.remove();
+        long start = System.nanoTime();
+
+        MvcResult result = send(REQUEST.replace("\"iValorComision\": 0", "\"iValorComision\": 1E999999999"));
+
+        assertThat(result.getResponse().getStatus()).isEqualTo(400);
+        assertThat(SESSION.get().calls()).as("nothing ran").isEmpty();
+        assertThat(java.time.Duration.ofNanos(System.nanoTime() - start)).isLessThan(java.time.Duration.ofSeconds(5));
     }
 
     @Test

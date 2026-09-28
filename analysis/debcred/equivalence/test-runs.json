@@ -43,6 +43,22 @@
     },
     {
       "module": "sp_debcred_empresa",
+      "change": "JSEC-003 canary, in a scratch copy: the 38-decimal limit on money inputs removed",
+      "junit": [
+        "analysis/debcred/equivalence/canary/sp_debcred_empresa/jsec003-no-scale-limit"
+      ],
+      "log": []
+    },
+    {
+      "module": "sp_debcred_empresa",
+      "change": "JSEC-001 canary, in a scratch copy: authorization changed from hasRole(COBIS_CALLER) to permitAll",
+      "junit": [
+        "analysis/debcred/equivalence/canary/sp_debcred_empresa/jsec001-permit-all"
+      ],
+      "log": []
+    },
+    {
+      "module": "sp_debcred_empresa",
       "change": "transform's canary (Phase 4): sp_eventos return status ignored, line 1248 (RULE-034)",
       "junit": [
         "analysis/debcred/equivalence/canary/sp_debcred_empresa/notif-1248-ignored"

@@ -52,5 +52,38 @@ public record DebitRequest(
         if (iSecuencial == null) {
             iSecuencial = 0;
         }
+        requireMoney("iValorOrdenado", iValorOrdenado);
+        requireMoney("iValorDebito", iValorDebito);
+        requireMoney("iComision", iComision);
+        requireMoney("iValorComision", iValorComision);
+        requireMoney("iValor2Swift", iValor2Swift);
+        requireMoney("iValorTarifa", iValorTarifa);
+        requireMoney("iValorComisionCue", iValorComisionCue);
+        requireMoney("iValorTarifaEfe", iValorTarifaEfe);
+        requireMoney("iValorComisionEfe", iValorComisionEfe);
+        requireMoney("iValorTarifaChe", iValorTarifaChe);
+        requireMoney("iValorComisionChe", iValorComisionChe);
+    }
+
+    /** The largest ASE {@code money} value; the smallest is its negative. */
+    static final BigDecimal MONEY_MAX = new BigDecimal("922337203685477.5807");
+    /** No SQL numeric type holds more decimals than this. */
+    static final int MAX_DECIMALS = 38;
+
+    /**
+     * Harden JSEC-003 (brief section 7 A21): a value the legacy's {@code money} parameters could never hold
+     * is refused (HTTP 400) before anything runs. Scale and precision are checked first, so a JSON number
+     * such as {@code 1E999999999} is rejected without being expanded. The message never echoes the value.
+     */
+    private static void requireMoney(String name, BigDecimal value) {
+        if (value == null) {
+            return;
+        }
+        boolean fits = value.scale() <= MAX_DECIMALS
+                && value.precision() - value.scale() <= 15                 // at most 15 integer digits
+                && value.abs().compareTo(MONEY_MAX) <= 0;
+        if (!fits) {
+            throw new IllegalArgumentException(name + " does not fit an ASE money value");
+        }
     }
 }

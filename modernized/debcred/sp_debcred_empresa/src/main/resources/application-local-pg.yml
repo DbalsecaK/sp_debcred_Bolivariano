@@ -1,4 +1,7 @@
-# Local PostgreSQL test environment (not production). Listens on localhost only.
+# Local PostgreSQL test environment (not production). Listens on localhost only, plain HTTP, no mTLS
+# (SecurityConfiguration.localOnly): only this machine can reach it.
 server:
   address: 127.0.0.1
   port: 8080
+  ssl:
+    enabled: false
